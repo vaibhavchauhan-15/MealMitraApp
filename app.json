@@ -1,15 +1,16 @@
 {
   "expo": {
-    "name": "MealMitraApp",
-    "slug": "MealMitraApp",
+    "name": "MealMitra",
+    "slug": "mealmitra",
+    "scheme": "mealmitra",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#FF6B35"
     },
     "ios": {
       "supportsTablet": true
