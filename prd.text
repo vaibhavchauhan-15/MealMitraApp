@@ -1,0 +1,583 @@
+📄 Product Requirements Document (PRD)
+Product Name
+
+MealMitra
+
+Platform
+
+Android
+
+iOS
+
+Built with:
+
+React Native + Expo
+
+TypeScript
+
+Offline JSON recipe database
+
+Fast search indexing
+
+Clean modern UI
+
+Light/Dark theme
+
+1. Product Overview
+Goal
+
+Create a modern, fast, offline-first Indian recipe app containing 10,000–50,000 recipes covering all Indian cuisines.
+
+The app should help users:
+
+Discover recipes
+
+Cook with step-by-step instructions
+
+Plan meals
+
+Generate grocery lists
+
+Ask AI cooking questions
+
+The app must be:
+
+Fast
+
+Clean UI
+
+Lightweight
+
+Offline capable
+
+Free
+
+No ads
+
+No subscription
+
+2. Target Users
+Beginner cooks
+
+Need simple recipes with steps.
+
+Home cooks
+
+Need meal planning and grocery lists.
+
+Students / busy users
+
+Need quick recipes and filters.
+
+Health conscious users
+
+Need nutrition data and diet filters.
+
+3. Supported Cuisines
+
+Examples:
+
+Gujarati
+
+Punjabi
+
+Rajasthani
+
+Bengali
+
+Maharashtrian
+
+South Indian
+
+North Indian
+
+Indo-Chinese
+
+Street Food
+
+Desserts
+
+4. Core Features
+Recipe discovery
+
+Search and browse recipes.
+
+Cooking mode
+
+Step-by-step cooking interface.
+
+Ingredient scaling
+
+Change servings automatically.
+
+Nutrition information
+
+Per serving nutrition.
+
+AI cooking assistant
+
+Ingredient substitution and cooking help.
+
+Meal planner
+
+Weekly planning.
+
+Grocery list
+
+Auto generated shopping list.
+
+Offline access
+
+All recipes stored locally.
+
+5. Tech Stack (Free + Open Source)
+Mobile App
+
+React Native + Expo
+
+Libraries:
+
+Navigation
+
+expo-router
+
+State management
+
+zustand
+
+Animations
+
+react-native-reanimated
+moti
+
+Icons
+
+lucide-react-native
+
+UI
+
+nativewind
+react-native-paper
+
+Theme
+
+react-native-appearance
+
+Storage
+
+expo-sqlite
+or
+mmkv
+
+Search
+
+fuse.js
+
+AI assistant
+
+open source LLM API
+or
+ollama server
+6. Architecture
+Offline First Architecture
+App
+│
+├── Local Recipe Database
+│       recipes.json
+│
+├── Search Index
+│       fuse.js index
+│
+├── State Store
+│       Zustand
+│
+├── Local Storage
+│       SQLite / MMKV
+│
+└── Optional API Layer
+        AI assistant
+7. Database Design
+
+Since you want JSON recipes, each recipe should follow strict schema.
+
+Recipe JSON structure
+{
+  "id": "paneer_butter_masala",
+  "name": "Paneer Butter Masala",
+  "cuisine": "Punjabi",
+  "diet": "Vegetarian",
+  "difficulty": "Medium",
+  "cook_time": 35,
+  "servings": 4,
+  "calories": 320,
+  "rating": 4.8,
+  "reviews": 1200,
+  "image": "paneer_butter_masala.jpg",
+
+  "ingredients": [
+    {
+      "name": "Paneer",
+      "quantity": 200,
+      "unit": "g"
+    },
+    {
+      "name": "Tomato",
+      "quantity": 2,
+      "unit": "pcs"
+    }
+  ],
+
+  "preparation": [
+    {
+      "ingredient": "Onion",
+      "cut": "finely chopped"
+    },
+    {
+      "ingredient": "Paneer",
+      "cut": "cube"
+    }
+  ],
+
+  "nutrition": {
+    "protein": 12,
+    "carbs": 18,
+    "fat": 20,
+    "fiber": 3,
+    "sugar": 4
+  },
+
+  "equipment": [
+    "Pan",
+    "Blender",
+    "Knife"
+  ],
+
+  "steps": [
+    {
+      "step": 1,
+      "instruction": "Heat butter in a pan",
+      "time": 3
+    },
+    {
+      "step": 2,
+      "instruction": "Add chopped onion and sauté",
+      "time": 5
+    }
+  ],
+
+  "tips": [
+    "Use fresh cream for better taste",
+    "Roast paneer for smoky flavor"
+  ],
+
+  "tags": [
+    "quick",
+    "indian",
+    "vegetarian"
+  ]
+}
+8. Search System
+
+Since recipes are local:
+
+Use Fuse.js fuzzy search.
+
+Search fields:
+
+name
+ingredients
+cuisine
+tags
+
+Filters:
+
+diet
+cooking time
+difficulty
+calories
+cuisine
+
+Expected search speed:
+
+10k recipes < 50ms
+9. UI / UX Design Principles
+Design philosophy
+
+Clean
+Minimal
+Readable
+Fast
+
+Color system
+
+Light mode:
+
+background: #FFFFFF
+text: #111111
+accent: #FF6B35
+
+Dark mode:
+
+background: #121212
+text: #FFFFFF
+accent: #FF6B35
+Typography
+
+Use:
+
+Inter
+10. App Navigation Structure
+
+Bottom tabs:
+
+Home
+Search
+Saved
+Planner
+Profile
+11. Page List
+Onboarding
+
+1 Splash screen
+2 Onboarding slides
+3 Login
+4 Signup
+5 Profile setup
+
+Discovery
+
+6 Home page
+7 Search page
+8 Recipe category
+
+Cooking
+
+9 Recipe detail
+10 Cooking mode
+
+User
+
+11 Saved recipes
+12 Recently viewed
+13 My recipes
+14 Upload recipe
+
+Planner
+
+15 Meal planner
+16 Grocery list
+
+AI
+
+17 AI recipe generator
+18 Ingredient scanner
+
+Profile
+
+19 User profile
+20 Reviews
+
+Utility
+
+21 Notifications
+22 Settings
+23 Help
+24 Privacy policy
+
+12. Recipe Detail Page Layout
+
+Order:
+
+Recipe Header
+Ingredient List
+Nutrition Info
+Preparation
+Step Cooking
+Timers
+Equipment
+Chef Tips
+Reviews
+Similar Recipes
+Save / Share
+AI Assistant
+13. Cooking Mode
+
+Features:
+
+Full screen cooking.
+
+Large text.
+
+Steps:
+
+Step 1
+Instruction
+Timer button
+Next button
+
+Optional:
+
+Voice navigation.
+
+14. Meal Planner
+
+Weekly calendar:
+
+Mon
+Tue
+Wed
+Thu
+Fri
+Sat
+Sun
+
+User selects recipe → added to day.
+
+15. Grocery List
+
+Auto generate ingredients from meal plan.
+
+Example:
+
+Tomatoes
+Onions
+Paneer
+Butter
+Cream
+
+Checkbox while shopping.
+
+16. AI Cooking Assistant
+
+User questions:
+
+Can I replace cream with milk?
+How to make vegan?
+What if paneer is unavailable?
+
+AI returns cooking advice.
+
+17. Performance Targets
+
+Startup time
+
+< 2 seconds
+
+Search speed
+
+< 100 ms
+
+Recipe open time
+
+< 300 ms
+18. Recipe Dataset Strategy
+
+Sources:
+
+Open recipe datasets
+
+Examples:
+
+Kaggle
+GitHub recipe datasets
+Food.com dataset
+
+Then convert to:
+
+indian_recipes.json
+
+Target:
+
+10k → launch
+50k → future
+19. Folder Structure
+src
+ ├── components
+ ├── screens
+ ├── navigation
+ ├── hooks
+ ├── store
+ ├── utils
+ ├── services
+ ├── data
+ │     recipes.json
+ └── theme
+20. Future Features
+
+Voice cooking mode
+
+Smart meal planner
+
+AI diet coach
+
+Community recipes
+
+Ingredient image recognition
+
+21. Monetization (optional future)
+
+Recipe ebooks
+
+Premium meal plans
+
+Chef courses
+
+22. App Size Target
+
+Keep under:
+
+< 80 MB
+
+Even with recipe images.
+
+23. Security & Privacy
+
+No personal data sold.
+
+Local storage for:
+
+saved recipes
+meal plan
+preferences
+24. Development Roadmap
+Phase 1
+
+Core app
+
+Home
+
+Search
+
+Recipe detail
+
+Saved recipes
+
+Phase 2
+
+Cooking mode
+
+Meal planner
+
+Grocery list
+
+Phase 3
+
+AI assistant
+
+Recipe generator
+
+Phase 4
+
+Community features
+
+25. MVP Features
+
+For first release:
+
+Home
+Search
+Recipe detail
+Saved recipes
+Cooking mode
+Meal planner
+Grocery list

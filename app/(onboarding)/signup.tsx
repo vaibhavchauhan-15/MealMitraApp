@@ -9,12 +9,17 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
+import { Toast } from '../../src/components/Toast';
+import { useToast } from '../../src/hooks/useToast';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { useUserStore } from '../../src/store/userStore';
+import { supabase } from '../../src/services/supabase';
+import * as Linking from 'expo-linking';
 
 export default function SignupScreen() {
   const { colors, isDark } = useTheme();
@@ -25,13 +30,53 @@ export default function SignupScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { toast, showToast } = useToast();
 
-  const handleSignup = () => {
-    if (!name.trim() || !email.trim()) return;
-    setProfile({
-      id: Date.now().toString(),
-      name: name.trim(),
+  const handleSignup = async () => {
+    if (!name.trim() || !email.trim() || !password.trim()) {
+      showToast('Please fill in all fields.', 'error', 'Error');
+      return;
+    }
+    if (password.length < 8) {
+      showToast('Password must be at least 8 characters.', 'error', 'Error');
+      return;
+    }
+    setLoading(true);
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
+      password: password.trim(),
+      options: {
+        data: { name: name.trim() },
+        emailRedirectTo: Linking.createURL('auth/confirm'),
+      },
+    });
+    setLoading(false);
+
+    if (error) {
+      showToast(error.message, 'error', 'Sign Up Failed');
+      return;
+    }
+
+    const user = data.user;
+    const session = data.session;
+
+    if (!user) {
+      showToast('Could not create account. Please try again.', 'error', 'Error');
+      return;
+    }
+
+    // session is null when Supabase "Confirm email" is ON — user is created but unconfirmed
+    if (!session) {
+      router.push({ pathname: '/(onboarding)/email-sent' as any, params: { email: email.trim() } });
+      return;
+    }
+
+    // session exists — "Confirm email" is OFF in Supabase, user is live immediately
+    setProfile({
+      id: user.id,
+      name: name.trim(),
+      email: user.email ?? email.trim(),
       favoriteCuisines: [],
       cookingLevel: 'Beginner',
     });
@@ -94,8 +139,13 @@ export default function SignupScreen() {
           <TouchableOpacity
             style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
             onPress={handleSignup}
+            disabled={loading}
           >
-            <Text style={styles.primaryBtnText}>Create Account</Text>
+            {loading ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Text style={styles.primaryBtnText}>Create Account</Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -103,6 +153,8 @@ export default function SignupScreen() {
           By signing up, you agree to our Privacy Policy. No personal data is sold.
         </Text>
       </ScrollView>
+
+      <Toast visible={toast.visible} message={toast.message} type={toast.type} title={toast.title} />
     </KeyboardAvoidingView>
   );
 }

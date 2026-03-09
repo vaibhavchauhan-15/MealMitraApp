@@ -6,9 +6,11 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Alert,
   KeyboardTypeOptions,
 } from 'react-native';
+import { Toast } from '../src/components/Toast';
+import { ConfirmModal } from '../src/components/ConfirmModal';
+import { useToast } from '../src/hooks/useToast';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -30,17 +32,15 @@ export default function UploadRecipeScreen() {
   const [difficulty, setDifficulty] = useState('Easy');
   const [cookTime, setCookTime] = useState('');
   const [servings, setServings] = useState('');
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const { toast, showToast } = useToast();
 
   const handleSubmit = () => {
     if (!name.trim() || !description.trim() || !cuisine.trim()) {
-      Alert.alert('Missing Fields', 'Please fill in name, description, and cuisine.');
+      showToast('Please fill in name, description, and cuisine.', 'error', 'Missing Fields');
       return;
     }
-    Alert.alert(
-      'Recipe Submitted! 🎉',
-      'Your recipe has been submitted for review and will appear in the app soon.',
-      [{ text: 'OK', onPress: () => router.back() }]
-    );
+    setShowSuccessModal(true);
   };
 
   const Field = ({ label, value, onChangeText, placeholder, multiline = false, keyboardType = 'default' }: { label: string; value: string; onChangeText: (t: string) => void; placeholder: string; multiline?: boolean; keyboardType?: KeyboardTypeOptions }) => (
@@ -139,6 +139,22 @@ export default function UploadRecipeScreen() {
           <Text style={styles.submitBtnText}>Submit Recipe</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <Toast visible={toast.visible} message={toast.message} type={toast.type} title={toast.title} />
+
+      <ConfirmModal
+        visible={showSuccessModal}
+        title="Recipe Submitted! 🎉"
+        message="Your recipe has been submitted for review and will appear in the app soon."
+        confirmText="OK"
+        hideCancelButton
+        icon="checkmark-circle-outline"
+        iconColor="#22C55E"
+        onConfirm={() => {
+          setShowSuccessModal(false);
+          router.back();
+        }}
+      />
     </View>
   );
 }

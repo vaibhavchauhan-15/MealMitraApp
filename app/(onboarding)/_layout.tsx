@@ -7,6 +7,7 @@ export default function OnboardingLayout() {
       <Stack.Screen name="slides" />
       <Stack.Screen name="login" />
       <Stack.Screen name="signup" />
+      <Stack.Screen name="email-sent" />
       <Stack.Screen name="profile-setup" />
     </Stack>
   );

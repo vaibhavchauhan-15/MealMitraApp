@@ -6,8 +6,8 @@ import {
   TouchableOpacity,
   ScrollView,
   Switch,
-  Alert,
 } from 'react-native';
+import { ConfirmModal } from '../src/components/ConfirmModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -25,20 +25,9 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { profile, updateProfile, logout } = useUserStore();
   const [units, setUnits] = useState<'metric' | 'imperial'>('metric');
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
-  const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: () => {
-          logout();
-          router.replace('/(onboarding)' as any);
-        },
-      },
-    ]);
-  };
+  const handleLogout = () => setShowLogoutModal(true);
 
   const SectionLabel = ({ label }: { label: string }) => (
     <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{label.toUpperCase()}</Text>
@@ -144,6 +133,23 @@ export default function SettingsScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <ConfirmModal
+        visible={showLogoutModal}
+        title="Logout"
+        message="Are you sure you want to logout?"
+        confirmText="Logout"
+        cancelText="Cancel"
+        destructive
+        icon="log-out-outline"
+        iconColor="#EF4444"
+        onConfirm={() => {
+          setShowLogoutModal(false);
+          logout();
+          router.replace('/(onboarding)' as any);
+        }}
+        onCancel={() => setShowLogoutModal(false)}
+      />
     </View>
   );
 }

@@ -6,10 +6,10 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Alert,
   StatusBar,
   Modal,
 } from 'react-native';
+import { ConfirmModal } from '../../src/components/ConfirmModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -35,6 +35,7 @@ export default function PlannerScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>('Mon');
+  const [showClearModal, setShowClearModal] = useState(false);
   const { meals, removeMeal, clearWeek, getMealsForDay } = usePlannerStore();
   const { addItems } = useGroceryStore();
   const { getRecipeById, recipes } = useRecipeStore();
@@ -67,12 +68,7 @@ export default function PlannerScreen() {
           {meals.length > 0 && (
             <TouchableOpacity
               style={[styles.actionBtn, { backgroundColor: colors.surface }]}
-              onPress={() =>
-                Alert.alert('Clear Week', 'Remove all planned meals?', [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Clear', style: 'destructive', onPress: clearWeek },
-                ])
-              }
+              onPress={() => setShowClearModal(true)}
             >
               <Ionicons name="trash-outline" size={18} color={colors.error} />
             </TouchableOpacity>
@@ -195,6 +191,22 @@ export default function PlannerScreen() {
         })}
         <View style={{ height: Spacing['3xl'] }} />
       </ScrollView>
+
+      <ConfirmModal
+        visible={showClearModal}
+        title="Clear Week"
+        message="Remove all planned meals for the week?"
+        confirmText="Clear"
+        cancelText="Cancel"
+        destructive
+        icon="trash-outline"
+        iconColor="#EF4444"
+        onConfirm={() => {
+          setShowClearModal(false);
+          clearWeek();
+        }}
+        onCancel={() => setShowClearModal(false)}
+      />
     </View>
   );
 }
