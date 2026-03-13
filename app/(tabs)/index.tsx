@@ -1,28 +1,32 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
   FlatList,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/theme/useTheme';
-import { Spacing, Typography, BorderRadius, Shadow } from '../../src/theme';
+import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { RecipeCard } from '../../src/components/RecipeCard';
 import { CuisineCard } from '../../src/components/CuisineCard';
 import { SearchBar } from '../../src/components/SearchBar';
 import {
-  getFeaturedRecipes,
-  getTrendingRecipes,
-  getQuickRecipes,
+  getPersonalizedRecipes,
+  getLowCalorieRecipes,
+  getHighProteinRecipes,
   CUISINE_LIST,
 } from '../../src/services/searchService';
 import { useUserStore } from '../../src/store/userStore';
+import { useRecipeStore } from '../../src/store/recipeStore';
+import { Recipe } from '../../src/types';
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
@@ -30,9 +34,77 @@ export default function HomeScreen() {
   const router = useRouter();
   const profile = useUserStore((s) => s.profile);
 
-  const featured = getFeaturedRecipes();
-  const trending = getTrendingRecipes();
-  const quick = getQuickRecipes();
+  const {
+    featured, trending, quick, totalCount, initialLoaded, loadInitialData, addToCache,
+  } = useRecipeStore();
+
+  // Personalized sections
+  const [personalized, setPersonalized] = useState<Recipe[]>([]);
+  const [lowCalorie, setLowCalorie] = useState<Recipe[]>([]);
+  const [highProtein, setHighProtein] = useState<Recipe[]>([]);
+  const [forYouView, setForYouView] = useState<'recommended' | 'fat_loss' | 'low_calorie' | 'high_protein'>('recommended');
+
+  // Load home-screen data once
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  // Load personalized section whenever profile changes
+  useEffect(() => {
+    getPersonalizedRecipes(profile ?? null, 12).then((r) => {
+      setPersonalized(r);
+      addToCache(r);
+    });
+  }, [profile?.id, profile?.healthProfile?.fitnessGoal]);
+
+  // Load reusable "For You" collections once
+  useEffect(() => {
+    Promise.all([
+      getLowCalorieRecipes(320, 10),
+      getHighProteinRecipes(20, 10),
+    ]).then(([lowCal, highProt]) => {
+      setLowCalorie(lowCal);
+      setHighProtein(highProt);
+      addToCache(lowCal);
+      addToCache(highProt);
+    });
+  }, []);
+
+  useEffect(() => {
+    const goal = profile?.healthProfile?.fitnessGoal;
+    if (goal === 'fat_loss') {
+      setForYouView('fat_loss');
+      return;
+    }
+    if (goal === 'muscle_gain') {
+      setForYouView('high_protein');
+      return;
+    }
+    setForYouView('recommended');
+  }, [profile?.healthProfile?.fitnessGoal]);
+
+  const goal = profile?.healthProfile?.fitnessGoal;
+
+  const forYouData = useMemo(() => {
+    if (forYouView === 'fat_loss') {
+      if (goal === 'fat_loss' && personalized.length > 0) return personalized;
+      return lowCalorie;
+    }
+    if (forYouView === 'low_calorie') return lowCalorie;
+    if (forYouView === 'high_protein') return highProtein;
+    if (personalized.length > 0) return personalized;
+    return featured;
+  }, [forYouView, goal, personalized, lowCalorie, highProtein, featured]);
+
+  const forYouChips = useMemo(
+    () => [
+      { key: 'recommended' as const, label: 'Recommended' },
+      { key: 'fat_loss' as const, label: 'Fat Loss' },
+      { key: 'low_calorie' as const, label: 'Low Calorie' },
+      { key: 'high_protein' as const, label: 'High Protein' },
+    ],
+    []
+  );
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -61,13 +133,14 @@ export default function HomeScreen() {
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background }]}>
-        <View>
-          <Text style={[styles.greeting, { color: colors.textSecondary }]}>
-            {greeting()}, {profile?.name || 'Foodie'} 👋
-          </Text>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>
-            What will you{'\n'}cook today?
-          </Text>
+        <View style={styles.headerLeft}>
+          <Image source={require('../../assets/logo/logo.png')} style={styles.headerLogo} resizeMode="contain" />
+          <View>
+            <Text style={[styles.greeting, { color: colors.textSecondary }]}>
+              {greeting()}, {profile?.name || 'Foodie'} 👋
+            </Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Trending today</Text>
+          </View>
         </View>
         <TouchableOpacity
           style={[styles.notifBtn, { backgroundColor: colors.surface }]}
@@ -88,45 +161,84 @@ export default function HomeScreen() {
           activeOpacity={0.9}
         >
           <View pointerEvents="none">
-            <SearchBar value="" onChangeText={() => {}} placeholder="Search 10,000+ recipes…" />
+            <SearchBar value="" onChangeText={() => {}} placeholder={totalCount > 0 ? `Search ${totalCount}+ recipes…` : 'Search recipes…'} />
           </View>
         </TouchableOpacity>
 
-        {/* Quick Stats */}
-        <View style={styles.statsRow}>
-          {[
-            { icon: 'restaurant-outline', label: '10K+', sub: 'Recipes' },
-            { icon: 'location-outline', label: '12', sub: 'Cuisines' },
-            { icon: 'star-outline', label: '4.8', sub: 'Avg Rating' },
-          ].map((stat) => (
-            <View key={stat.label} style={[styles.statCard, { backgroundColor: colors.surface }]}>
-              <Ionicons name={stat.icon as any} size={20} color={colors.accent} />
-              <Text style={[styles.statValue, { color: colors.text }]}>{stat.label}</Text>
-              <Text style={[styles.statSub, { color: colors.textSecondary }]}>{stat.sub}</Text>
-            </View>
-          ))}
-        </View>
-
         {/* Featured Recipes */}
         {renderSectionHeader('⭐ Featured', () => router.push('/(tabs)/search' as any))}
-        <FlatList
-          data={featured}
-          renderItem={({ item }) => <RecipeCard recipe={item} />}
-          keyExtractor={(item) => item.id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalList}
-        />
+        {!initialLoaded ? (
+          <ActivityIndicator color={colors.accent} style={{ marginBottom: Spacing.lg }} />
+        ) : (
+          <FlatList
+            data={featured}
+            renderItem={({ item }) => <RecipeCard recipe={item} />}
+            keyExtractor={(item) => item.id}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalList}
+            initialNumToRender={4}
+            maxToRenderPerBatch={6}
+            windowSize={5}
+          />
+        )}
+
+        {/* Personalized "For You" */}
+        {(forYouData.length > 0 || personalized.length > 0) && (
+          <>
+            {renderSectionHeader('🤖 Recommended For You', () => router.push('/(tabs)/search' as any))}
+            <FlatList
+              data={forYouChips}
+              renderItem={({ item }) => {
+                const active = forYouView === item.key;
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.forYouChip,
+                      {
+                        backgroundColor: active ? colors.accentLight : colors.surface,
+                        borderColor: active ? colors.accent : colors.border,
+                      },
+                    ]}
+                    onPress={() => setForYouView(item.key)}
+                  >
+                    <Text style={[styles.forYouChipText, { color: active ? colors.accent : colors.textSecondary }]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
+              keyExtractor={(item) => item.key}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsRow}
+            />
+            <FlatList
+              data={forYouData}
+              renderItem={({ item }) => <RecipeCard recipe={item} />}
+              keyExtractor={(item) => item.id + '-for-you'}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              initialNumToRender={4}
+              maxToRenderPerBatch={6}
+              windowSize={5}
+            />
+          </>
+        )}
 
         {/* Cuisines */}
-        {renderSectionHeader('🍽️ By Cuisine')}
+        {renderSectionHeader('🍲 Browse by Cuisine')}
         <FlatList
-          data={CUISINE_LIST}
+          data={CUISINE_LIST.slice(0, 8)}
           renderItem={({ item }) => <CuisineCard name={item} />}
           keyExtractor={(item) => item}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.horizontalList}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={3}
         />
 
         {/* Quick Recipes */}
@@ -138,20 +250,10 @@ export default function HomeScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.horizontalList}
+          initialNumToRender={4}
+          maxToRenderPerBatch={6}
+          windowSize={5}
         />
-
-        {/* AI Assistant Banner */}
-        <TouchableOpacity
-          style={[styles.aiBanner, { backgroundColor: colors.accent }]}
-          onPress={() => router.push('/ai-assistant' as any)}
-          activeOpacity={0.88}
-        >
-          <View>
-            <Text style={styles.aiTitle}>🤖 AI Cooking Assistant</Text>
-            <Text style={styles.aiSub}>Ask anything about cooking!</Text>
-          </View>
-          <Ionicons name="arrow-forward-circle" size={36} color="rgba(255,255,255,0.9)" />
-        </TouchableOpacity>
 
         {/* Trending */}
         {renderSectionHeader('🔥 Trending Now', () => router.push('/(tabs)/search' as any))}
@@ -159,24 +261,17 @@ export default function HomeScreen() {
           <RecipeCard key={recipe.id} recipe={recipe} horizontal />
         ))}
 
-        {/* Meal Planner CTA */}
-        <TouchableOpacity
-          style={[styles.plannerBanner, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          onPress={() => router.push('/(tabs)/planner' as any)}
-          activeOpacity={0.88}
-        >
-          <Ionicons name="calendar-outline" size={32} color={colors.accent} />
-          <View style={{ flex: 1, marginLeft: Spacing.md }}>
-            <Text style={[styles.plannerTitle, { color: colors.text }]}>Weekly Meal Planner</Text>
-            <Text style={[styles.plannerSub, { color: colors.textSecondary }]}>
-              Plan your meals and auto-generate grocery list
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
-        </TouchableOpacity>
-
         <View style={{ height: Spacing['2xl'] }} />
       </ScrollView>
+
+      {/* Floating AI Assistant Button */}
+      <TouchableOpacity
+        style={[styles.floatingAiBtn, { backgroundColor: colors.accent }]}
+        onPress={() => router.push('/ai-assistant' as any)}
+        activeOpacity={0.88}
+      >
+        <Text style={styles.floatingAiIcon}>🤖</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -186,9 +281,19 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     paddingHorizontal: Spacing.base,
-    paddingBottom: Spacing.md,
+    paddingBottom: Spacing.base,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    flex: 1,
+  },
+  headerLogo: {
+    width: 44,
+    height: 44,
   },
   greeting: {
     fontSize: Typography.fontSize.sm,
@@ -196,9 +301,9 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   headerTitle: {
-    fontSize: Typography.fontSize['2xl'],
-    fontWeight: '800',
-    lineHeight: 32,
+    fontSize: Typography.fontSize.lg,
+    fontWeight: '700',
+    lineHeight: 24,
   },
   notifBtn: {
     width: 44,
@@ -212,33 +317,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.base,
   },
   searchContainer: {
-    marginBottom: Spacing.lg,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginBottom: Spacing.lg,
-  },
-  statCard: {
-    flex: 1,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
-    alignItems: 'center',
-    gap: 3,
-  },
-  statValue: {
-    fontSize: Typography.fontSize.md,
-    fontWeight: '800',
-  },
-  statSub: {
-    fontSize: Typography.fontSize.xs,
+    marginBottom: Spacing.base,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.md,
-    marginTop: Spacing.sm,
+    marginTop: Spacing.lg,
   },
   sectionTitle: {
     fontSize: Typography.fontSize.lg,
@@ -249,42 +335,39 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   horizontalList: {
-    paddingBottom: Spacing.lg,
+    paddingBottom: Spacing.base,
+    gap: Spacing.base,
+  },
+  chipsRow: {
     gap: Spacing.sm,
+    paddingBottom: Spacing.base,
   },
-  aiBanner: {
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.base,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: Spacing.md,
-  },
-  aiTitle: {
-    color: '#FFF',
-    fontSize: Typography.fontSize.md,
-    fontWeight: '800',
-    marginBottom: 3,
-  },
-  aiSub: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: Typography.fontSize.sm,
-  },
-  plannerBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.base,
+  forYouChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
     borderWidth: 1,
-    marginBottom: Spacing.lg,
-    marginTop: Spacing.md,
   },
-  plannerTitle: {
-    fontSize: Typography.fontSize.base,
+  forYouChipText: {
+    fontSize: Typography.fontSize.xs,
     fontWeight: '700',
   },
-  plannerSub: {
-    fontSize: Typography.fontSize.sm,
-    marginTop: 2,
+  floatingAiBtn: {
+    position: 'absolute',
+    bottom: 70,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+  },
+  floatingAiIcon: {
+    fontSize: 26,
   },
 });

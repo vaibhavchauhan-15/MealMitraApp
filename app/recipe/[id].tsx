@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  Image,
   StatusBar,
   Share,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,8 @@ import { useRecipeStore } from '../../src/store/recipeStore';
 import { useSavedStore } from '../../src/store/savedStore';
 import { NutritionBadge } from '../../src/components/NutritionBadge';
 import { RecipeCard } from '../../src/components/RecipeCard';
+import { FallbackImage } from '../../src/components/FallbackImage';
+import { Recipe } from '../../src/types';
 
 const { width } = Dimensions.get('window');
 const IMAGE_HEIGHT = 280;
@@ -27,19 +29,37 @@ export default function RecipeDetailScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const getRecipeById = useRecipeStore((s) => s.getRecipeById);
-  const getSimilarRecipes = useRecipeStore((s) => s.getSimilarRecipes);
-  const addRecentlyViewed = useRecipeStore((s) => s.addRecentlyViewed);
+  const { id, source } = useLocalSearchParams<{ id: string; source?: string }>();
+  const routeSource: 'master' | 'ai' = source === 'ai' ? 'ai' : 'master';
+  const { fetchById, fetchSimilar, addRecentlyViewed } = useRecipeStore();
   const { toggleSaved, isSaved } = useSavedStore();
 
-  const recipe = getRecipeById(id);
-  const [servings, setServings] = useState(recipe?.servings ?? 2);
+  const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [similar, setSimilar] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [servings, setServings] = useState(2);
   const [activeTab, setActiveTab] = useState<'ingredients' | 'steps'>('ingredients');
 
-  React.useEffect(() => {
-    if (id) addRecentlyViewed(id);
-  }, [id]);
+  useEffect(() => {
+    if (!id) return;
+    fetchById(id, routeSource).then((r) => {
+      if (r) {
+        addRecentlyViewed(r.id);
+        setRecipe(r);
+        setServings(r.servings);
+        fetchSimilar(r).then(setSimilar);
+      }
+      setLoading(false);
+    });
+  }, [id, routeSource]);
+
+  if (loading) {
+    return (
+      <View style={[styles.screen, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </View>
+    );
+  }
 
   if (!recipe) {
     return (
@@ -50,7 +70,6 @@ export default function RecipeDetailScreen() {
   }
 
   const saved = isSaved(recipe.id);
-  const similar = getSimilarRecipes(recipe.id);
   const servingRatio = servings / recipe.servings;
 
   const dietColor =
@@ -93,7 +112,11 @@ export default function RecipeDetailScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Hero Image */}
-        <Image source={{ uri: recipe.image }} style={styles.heroImage} resizeMode="cover" />
+        <FallbackImage
+          uri={recipe.image}
+          style={styles.heroImage}
+          resizeMode="cover"
+        />
 
         <View style={styles.content}>
           {/* Recipe Header */}
@@ -149,7 +172,12 @@ export default function RecipeDetailScreen() {
           {/* Start Cooking Button */}
           <TouchableOpacity
             style={[styles.cookBtn, { backgroundColor: colors.accent }]}
-            onPress={() => router.push(`/recipe/cooking/${recipe.id}` as any)}
+            onPress={() =>
+              router.push({
+                pathname: '/recipe/cooking/[id]',
+                params: { id: recipe.id, source: routeSource },
+              } as any)
+            }
           >
             <Ionicons name="play-circle-outline" size={24} color="#FFF" />
             <Text style={styles.cookBtnText}>Start Cooking</Text>
@@ -161,6 +189,7 @@ export default function RecipeDetailScreen() {
             carbs={recipe.nutrition.carbs}
             fat={recipe.nutrition.fat}
             fiber={recipe.nutrition.fiber}
+            sugar={recipe.nutrition.sugar}
             calories={recipe.calories}
           />
 
@@ -209,14 +238,16 @@ export default function RecipeDetailScreen() {
           </View>
 
           {activeTab === 'ingredients' ? (
-            <View style={[styles.section, { backgroundColor: colors.surface }]}>
+            <View style={styles.ingList}>
               {recipe.ingredients.map((ing, idx) => (
-                <View key={idx} style={[styles.ingRow, idx > 0 && { borderTopWidth: 1, borderTopColor: colors.border }]}>
+                <View key={idx} style={[styles.ingRow, { backgroundColor: colors.surface }]}>
                   <View style={[styles.ingDot, { backgroundColor: colors.accent }]} />
                   <Text style={[styles.ingName, { color: colors.text }]}>{ing.name}</Text>
-                  <Text style={[styles.ingQty, { color: colors.accent }]}>
-                    {scaledQty(ing.quantity)} {ing.unit}
-                  </Text>
+                  <View style={[styles.ingQtyPill, { backgroundColor: colors.accent + '22', borderColor: colors.accent + '55' }]}>
+                    <Text style={[styles.ingQtyText, { color: colors.accent }]}>
+                      {ing.quantity > 0 ? `${scaledQty(ing.quantity)} ${ing.unit}`.trim() : ing.unit}
+                    </Text>
+                  </View>
                 </View>
               ))}
             </View>
@@ -317,6 +348,15 @@ const styles = StyleSheet.create({
     width,
     height: IMAGE_HEIGHT,
   },
+  heroPlaceholder: {
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroPlaceholderImg: {
+    width: IMAGE_HEIGHT,
+    height: IMAGE_HEIGHT,
+  },
   floatingHeader: {
     position: 'absolute',
     top: 0,
@@ -404,14 +444,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tabText: { fontWeight: '700', fontSize: Typography.fontSize.base },
+  ingList: {
+    gap: Spacing.sm,
+  },
   ingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.sm,
+    paddingVertical: 10,
+    paddingHorizontal: Spacing.md,
     gap: Spacing.sm,
+    borderRadius: BorderRadius.lg,
   },
-  ingDot: { width: 8, height: 8, borderRadius: 4 },
-  ingName: { flex: 1, fontSize: Typography.fontSize.base, fontWeight: '500' },
+  ingDot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
+  ingName: { flex: 1, fontSize: Typography.fontSize.base, fontWeight: '600', lineHeight: 20 },
+  ingQtyPill: {
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    flexShrink: 0,
+    maxWidth: 160,
+  },
+  ingQtyText: {
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '700',
+  },
   ingQty: { fontSize: Typography.fontSize.base, fontWeight: '700' },
   stepsContainer: { gap: Spacing.sm },
   stepCard: {

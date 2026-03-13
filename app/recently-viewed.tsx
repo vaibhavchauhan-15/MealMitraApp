@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   FlatList,
   StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,17 +14,26 @@ import { useTheme } from '../src/theme/useTheme';
 import { Spacing, Typography } from '../src/theme';
 import { useRecipeStore } from '../src/store/recipeStore';
 import { RecipeCard } from '../src/components/RecipeCard';
+import { Recipe } from '../src/types';
 
 export default function RecentlyViewedScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const recentIds = useRecipeStore((s) => s.recentlyViewed);
-  const getRecipeById = useRecipeStore((s) => s.getRecipeById);
+  const { fetchById, addToCache } = useRecipeStore();
+  const [recent, setRecent] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const recent = recentIds
-    .map((id) => getRecipeById(id))
-    .filter(Boolean) as ReturnType<typeof getRecipeById>[];
+  useEffect(() => {
+    if (recentIds.length === 0) { setRecent([]); setLoading(false); return; }
+    Promise.all(recentIds.map((id) => fetchById(id))).then((results) => {
+      const valid = results.filter(Boolean) as Recipe[];
+      setRecent(valid);
+      addToCache(valid);
+      setLoading(false);
+    });
+  }, [recentIds.join(',')]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -35,7 +45,9 @@ export default function RecentlyViewedScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      {recent.length === 0 ? (
+      {loading ? (
+        <ActivityIndicator color={colors.accent} style={{ marginTop: Spacing['3xl'] }} />
+      ) : recent.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyEmoji}>🕐</Text>
           <Text style={[styles.emptyTitle, { color: colors.text }]}>Nothing viewed yet</Text>
@@ -46,8 +58,8 @@ export default function RecentlyViewedScreen() {
       ) : (
         <FlatList
           data={recent}
-          keyExtractor={(r) => r!.id}
-          renderItem={({ item }) => item ? <RecipeCard recipe={item} horizontal /> : null}
+          keyExtractor={(r) => r.id}
+          renderItem={({ item }) => <RecipeCard recipe={item} horizontal />}
           contentContainerStyle={{ padding: Spacing.base, gap: Spacing.sm }}
           showsVerticalScrollIndicator={false}
         />

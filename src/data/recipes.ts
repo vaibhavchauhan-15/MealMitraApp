@@ -1,6 +1,26 @@
 import { Recipe } from '../types';
+import bengaliRecipes from './bengali';
+import bihariRecipes from './bihari';
+import desertRecipes from './desert';
+import fastfoodRecipes from './fastfood';
+import gujaratiRecipes from './gujrati';
+import haryanviRecipes from './haryanvi';
+import himachaliRecipes from './himachali';
+import indoChineseRecipes from './indo-chinese';
+import indoItalianRecipes from './indo-italian';
+import indoMexicanRecipes from './indo-mexican';
+import indoThaiRecipes from './indo-thai';
+import indoWesternRecipes from './indo-western';
+import kashmiriRecipes from './kashmiri';
+import kathiawadiRecipes from './kathiawadi';
+import maharashtrianRecipes from './maharashtrian';
+import odiaRecipes from './odia';
+import punjabiRecipes from './punjabi';
+import rajsthaniRecipes from './rajsthani';
+import southindianRecipes from './southindian';
+import streatRecipes from './streat';
 
-const recipes: Recipe[] = [
+const baseRecipes: Recipe[] = [
   {
     id: 'paneer_butter_masala',
     name: 'Paneer Butter Masala',
@@ -861,6 +881,204 @@ const recipes: Recipe[] = [
     ],
     tags: ['snack', 'street-food', 'vegan', 'quick', 'chaat'],
   },
+  {
+  id: 'chole_masala',
+  name: 'Chole Masala',
+  cuisine: 'Punjabi',
+  diet: 'Vegetarian',
+  difficulty: 'Medium',
+  cook_time: 40,
+  prep_time: 10,
+  servings: 4,
+  calories: 350,
+  rating: 4.7,
+  reviews: 980,
+  image: 'https://images.unsplash.com/photo-1601050690597-df0568f70950?w=400',
+  description: 'A spicy North Indian chickpea curry cooked with aromatic spices.',
+  ingredients: [
+    { name: 'Chickpeas', quantity: 250, unit: 'g' },
+    { name: 'Onion', quantity: 2, unit: 'pcs' },
+    { name: 'Tomato', quantity: 2, unit: 'pcs' },
+    { name: 'Ginger Garlic Paste', quantity: 1, unit: 'tbsp' },
+    { name: 'Chole Masala', quantity: 2, unit: 'tsp' },
+    { name: 'Turmeric', quantity: 1, unit: 'tsp' },
+    { name: 'Oil', quantity: 2, unit: 'tbsp' },
+    { name: 'Salt', quantity: 1, unit: 'tsp' }
+  ],
+  preparation: [
+    { ingredient: 'Onion', cut: 'finely chopped' },
+    { ingredient: 'Tomato', cut: 'chopped' }
+  ],
+  nutrition: { protein: 15, carbs: 45, fat: 10, fiber: 12, sugar: 6 },
+  equipment: ['Pressure Cooker', 'Pan', 'Knife'],
+  steps: [
+    { step: 1, instruction: 'Soak chickpeas overnight and pressure cook until soft.', time: 15 },
+    { step: 2, instruction: 'Heat oil and sauté onions until golden.', time: 5 },
+    { step: 3, instruction: 'Add ginger garlic paste and cook for 2 minutes.', time: 2 },
+    { step: 4, instruction: 'Add tomatoes and cook until soft.', time: 5 },
+    { step: 5, instruction: 'Add spices and cooked chickpeas.', time: 3 },
+    { step: 6, instruction: 'Simmer for 10 minutes.', time: 10 }
+  ],
+  tips: [
+    'Add tea bag while boiling chickpeas for darker color.',
+    'Serve with bhatura or rice.'
+  ],
+  tags: ['punjabi', 'curry', 'vegetarian']
+},
+
+{
+  id: 'dal_tadka',
+  name: 'Dal Tadka',
+  cuisine: 'North Indian',
+  diet: 'Vegetarian',
+  difficulty: 'Easy',
+  cook_time: 25,
+  prep_time: 5,
+  servings: 4,
+  calories: 210,
+  rating: 4.6,
+  reviews: 850,
+  image: 'https://images.unsplash.com/photo-1626500155537-93690c24099e?w=400',
+  description: 'A comforting lentil curry tempered with garlic and spices.',
+  ingredients: [
+    { name: 'Toor Dal', quantity: 200, unit: 'g' },
+    { name: 'Tomato', quantity: 2, unit: 'pcs' },
+    { name: 'Garlic', quantity: 5, unit: 'cloves' },
+    { name: 'Cumin Seeds', quantity: 1, unit: 'tsp' },
+    { name: 'Turmeric', quantity: 1, unit: 'tsp' },
+    { name: 'Ghee', quantity: 2, unit: 'tbsp' },
+    { name: 'Salt', quantity: 1, unit: 'tsp' }
+  ],
+  preparation: [
+    { ingredient: 'Tomato', cut: 'chopped' },
+    { ingredient: 'Garlic', cut: 'minced' }
+  ],
+  nutrition: { protein: 12, carbs: 28, fat: 8, fiber: 7, sugar: 3 },
+  equipment: ['Pressure Cooker', 'Pan'],
+  steps: [
+    { step: 1, instruction: 'Cook dal with turmeric until soft.', time: 12 },
+    { step: 2, instruction: 'Heat ghee and add cumin seeds.', time: 1 },
+    { step: 3, instruction: 'Add garlic and sauté.', time: 2 },
+    { step: 4, instruction: 'Add tomatoes and cook.', time: 4 },
+    { step: 5, instruction: 'Add cooked dal and simmer.', time: 6 }
+  ],
+  tips: [
+    'Add smoked charcoal flavor for restaurant style.',
+    'Use ghee for best taste.'
+  ],
+  tags: ['dal', 'comfort_food', 'vegetarian']
+},
+
+{
+  id: 'vegetable_biryani',
+  name: 'Vegetable Biryani',
+  cuisine: 'Hyderabadi',
+  diet: 'Vegetarian',
+  difficulty: 'Hard',
+  cook_time: 45,
+  prep_time: 20,
+  servings: 4,
+  calories: 420,
+  rating: 4.9,
+  reviews: 1600,
+  image: 'https://images.unsplash.com/photo-1633945274309-2c16f6b4b6d2?w=400',
+  description: 'A fragrant rice dish cooked with mixed vegetables and aromatic spices.',
+  ingredients: [
+    { name: 'Basmati Rice', quantity: 300, unit: 'g' },
+    { name: 'Mixed Vegetables', quantity: 200, unit: 'g' },
+    { name: 'Onion', quantity: 2, unit: 'pcs' },
+    { name: 'Yogurt', quantity: 100, unit: 'ml' },
+    { name: 'Biryani Masala', quantity: 2, unit: 'tsp' },
+    { name: 'Mint Leaves', quantity: 10, unit: 'pcs' },
+    { name: 'Oil', quantity: 3, unit: 'tbsp' }
+  ],
+  preparation: [
+    { ingredient: 'Onion', cut: 'sliced' },
+    { ingredient: 'Vegetables', cut: 'cubed' }
+  ],
+  nutrition: { protein: 10, carbs: 60, fat: 12, fiber: 6, sugar: 5 },
+  equipment: ['Pot', 'Pan'],
+  steps: [
+    { step: 1, instruction: 'Cook basmati rice until 70% done.', time: 10 },
+    { step: 2, instruction: 'Cook vegetables with spices.', time: 10 },
+    { step: 3, instruction: 'Layer rice and vegetables.', time: 5 },
+    { step: 4, instruction: 'Cook on dum for 20 minutes.', time: 20 }
+  ],
+  tips: [
+    'Use saffron milk for richer aroma.',
+    'Seal lid with dough for dum cooking.'
+  ],
+  tags: ['biryani', 'rice', 'vegetarian']
+},
+
+{
+  id: 'rajma_curry',
+  name: 'Rajma Curry',
+  cuisine: 'North Indian',
+  diet: 'Vegetarian',
+  difficulty: 'Medium',
+  cook_time: 35,
+  prep_time: 10,
+  servings: 4,
+  calories: 360,
+  rating: 4.7,
+  reviews: 900,
+  image: 'https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=400',
+  description: 'Kidney beans cooked in a rich tomato onion gravy.',
+  ingredients: [
+    { name: 'Rajma', quantity: 250, unit: 'g' },
+    { name: 'Onion', quantity: 2, unit: 'pcs' },
+    { name: 'Tomato', quantity: 3, unit: 'pcs' },
+    { name: 'Ginger Garlic Paste', quantity: 1, unit: 'tbsp' },
+    { name: 'Rajma Masala', quantity: 2, unit: 'tsp' }
+  ],
+  preparation: [
+    { ingredient: 'Onion', cut: 'chopped' },
+    { ingredient: 'Tomato', cut: 'chopped' }
+  ],
+  nutrition: { protein: 16, carbs: 42, fat: 9, fiber: 11, sugar: 5 },
+  equipment: ['Pressure Cooker', 'Pan'],
+  steps: [
+    { step: 1, instruction: 'Cook soaked rajma until soft.', time: 20 },
+    { step: 2, instruction: 'Prepare onion tomato gravy.', time: 10 },
+    { step: 3, instruction: 'Add rajma and simmer.', time: 5 }
+  ],
+  tips: [
+    'Add butter for richer taste.'
+  ],
+  tags: ['rajma', 'curry']
+},
 ];
+
+const allRecipesRaw: Recipe[] = [
+  ...baseRecipes,
+  ...punjabiRecipes,
+  ...bengaliRecipes,
+  ...bihariRecipes,
+  ...kashmiriRecipes,
+  ...gujaratiRecipes,
+  ...himachaliRecipes,
+  ...haryanviRecipes,
+  ...indoChineseRecipes,
+  ...indoItalianRecipes,
+  ...indoMexicanRecipes,
+  ...indoThaiRecipes,
+  ...indoWesternRecipes,
+  ...desertRecipes,
+  ...fastfoodRecipes,
+  ...odiaRecipes,
+  ...rajsthaniRecipes,
+  ...southindianRecipes,
+  ...streatRecipes,
+  ...kathiawadiRecipes,
+  ...maharashtrianRecipes,
+];
+
+const seenIds = new Set<string>();
+const recipes: Recipe[] = allRecipesRaw.filter((r) => {
+  if (seenIds.has(r.id)) return false;
+  seenIds.add(r.id);
+  return true;
+});
 
 export default recipes;

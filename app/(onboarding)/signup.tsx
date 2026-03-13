@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  Image,
   TextInput,
   TouchableOpacity,
   StyleSheet,
@@ -98,6 +99,7 @@ export default function SignupScreen() {
           <Text style={[styles.backText, { color: colors.accent }]}>← Back</Text>
         </TouchableOpacity>
 
+        <Image source={require('../../assets/logo/logo.png')} style={styles.logo} resizeMode="contain" />
         <Text style={[styles.title, { color: colors.text }]}>Create Account</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Join thousands of home cooks
@@ -167,6 +169,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing['3xl'],
   },
   backBtn: { alignSelf: 'flex-start', marginBottom: Spacing.sm },
+  logo: { width: 80, height: 80, alignSelf: 'center', marginBottom: Spacing.sm },
   backText: { fontSize: Typography.fontSize.base, fontWeight: '600' },
   title: { fontSize: Typography.fontSize['2xl'], fontWeight: '900' },
   subtitle: { fontSize: Typography.fontSize.base, marginBottom: Spacing.md },

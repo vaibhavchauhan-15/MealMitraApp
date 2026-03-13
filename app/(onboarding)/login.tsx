@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  Image,
   TextInput,
   TouchableOpacity,
   StyleSheet,
   StatusBar,
   KeyboardAvoidingView,
   Platform,
+  AppState,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
@@ -19,20 +21,10 @@ import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { useUserStore } from '../../src/store/userStore';
 import { supabase } from '../../src/services/supabase';
-import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import Constants from 'expo-constants';
+import * as AuthSession from 'expo-auth-session';
+import * as Linking from 'expo-linking';
 WebBrowser.maybeCompleteAuthSession();
-
-const CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? '';
-const CLIENT_SECRET = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_SECRET ?? '';
-
-// Expo Go uses the auth.expo.io proxy (Web OAuth client in Google Cloud Console)
-// Standalone uses the registered custom scheme (Android/iOS OAuth client)
-const isExpoGo = Constants.executionEnvironment === 'storeClient';
-const REDIRECT_URI = isExpoGo
-  ? 'https://auth.expo.io/@vaibhavchauhan_15/mealmitra'
-  : 'mealmitra://oauth2redirect/google';
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
@@ -45,49 +37,128 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const { toast, showToast } = useToast();
+  const googleLoadingRef = useRef(false);
 
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId: CLIENT_ID,
-    clientSecret: CLIENT_SECRET,
-    redirectUri: REDIRECT_URI,
-  });
+  // Safety net: when the app comes back to the foreground while googleLoading is true,
+  // check if auth succeeded. If not, the user cancelled — reset loading state.
+  // This covers Android's case where openAuthSessionAsync never resolves.
+  useEffect(() => {
+    googleLoadingRef.current = googleLoading;
+  }, [googleLoading]);
 
   useEffect(() => {
-    if (response?.type === 'success') {
-      const { authentication } = response;
-      if (authentication?.accessToken) {
-        fetchGoogleUser(authentication.accessToken);
+    const subscription = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'active' && googleLoadingRef.current) {
+        // Give the Linking handler in _layout.tsx time to process and navigate first
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        // If still mounted and no session, user cancelled
+        if (googleLoadingRef.current) {
+          const { data } = await supabase.auth.getSession();
+          if (!data.session) {
+            setGoogleLoading(false);
+          }
+        }
       }
-    }
-    if (response?.type === 'error' || response?.type === 'dismiss') {
-      setGoogleLoading(false);
-    }
-  }, [response]);
+    });
+    return () => subscription.remove();
+  }, []);
 
-  const fetchGoogleUser = async (accessToken: string) => {
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
     try {
-      const res = await fetch('https://www.googleapis.com/userinfo/v2/me', {
-        headers: { Authorization: `Bearer ${accessToken}` },
+      const redirectTo = AuthSession.makeRedirectUri({
+        scheme: 'mealmitra',
+        path: 'auth/callback',
       });
-      const user = await res.json();
-      setProfile({
-        id: user.id,
-        name: user.name ?? user.email?.split('@')[0] ?? 'User',
-        email: user.email ?? '',
-        avatar: user.picture ?? undefined,
-        favoriteCuisines: [],
-        cookingLevel: 'Intermediate',
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+        },
       });
-      setHasOnboarded(true);
-      router.replace('/(tabs)' as any);
-    } catch {
+
+      if (error || !data.url) {
+        showToast(error?.message ?? 'Could not start Google sign-in', 'error', 'Error');
+        setGoogleLoading(false);
+        return;
+      }
+
+      if (Platform.OS === 'android') {
+        // On Android, Chrome Custom Tabs (used by openAuthSessionAsync) don't reliably
+        // close when redirecting to a custom scheme on Android 12+ / Chrome 107+.
+        // Instead, open the URL in the system browser and let the Linking listener
+        // in _layout.tsx complete the flow when the deep link fires.
+        await Linking.openURL(data.url);
+        // The AppState listener above handles resetting loading if user cancels.
+      } else {
+        // iOS: ASWebAuthenticationSession handles custom scheme redirects correctly.
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+        if (result.type === 'success' && result.url) {
+          await handleOAuthCallback(result.url);
+        } else {
+          setGoogleLoading(false);
+        }
+      }
+    } catch (err: any) {
+      showToast(err?.message ?? 'Google sign-in failed', 'error', 'Error');
       setGoogleLoading(false);
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    setGoogleLoading(true);
-    await promptAsync();
+  const handleOAuthCallback = async (url: string) => {
+    try {
+      // Supabase can return either a code (PKCE) or access_token (implicit) in the URL
+      const fragment = url.includes('#') ? url.split('#')[1] : '';
+      const queryString = url.includes('?') ? url.split('?')[1]?.split('#')[0] : '';
+      const parseParams = (str: string) => {
+        const params: Record<string, string> = {};
+        str.split('&').forEach((part) => {
+          const [key, value] = part.split('=');
+          if (key && value) params[key] = decodeURIComponent(value);
+        });
+        return params;
+      };
+      const fragmentParams = parseParams(fragment);
+      const queryParams = parseParams(queryString ?? '');
+
+      const code = queryParams['code'] || fragmentParams['code'];
+      const accessToken = fragmentParams['access_token'] || queryParams['access_token'];
+      const refreshToken = fragmentParams['refresh_token'] || queryParams['refresh_token'];
+
+      let user = null;
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(url);
+        if (error) throw error;
+        user = data.user;
+      } else if (accessToken && refreshToken) {
+        const { data, error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (error) throw error;
+        user = data.user;
+      }
+
+      if (user) {
+        setProfile({
+          id: user.id,
+          name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email?.split('@')[0] ?? 'User',
+          email: user.email ?? '',
+          avatar: user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? undefined,
+          favoriteCuisines: [],
+          cookingLevel: 'Intermediate',
+        });
+        setHasOnboarded(true);
+        router.replace('/(tabs)' as any);
+      } else {
+        setGoogleLoading(false);
+      }
+    } catch (err: any) {
+      showToast(err?.message ?? 'Authentication failed', 'error', 'Error');
+      setGoogleLoading(false);
+    }
   };
 
   const handleLogin = async () => {
@@ -140,7 +211,7 @@ export default function LoginScreen() {
         contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing['2xl'] }]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.logo}>🍛</Text>
+        <Image source={require('../../assets/logo/logo.png')} style={styles.logo} resizeMode="contain" />
         <Text style={[styles.title, { color: colors.text }]}>Welcome Back!</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Sign in to continue cooking
@@ -190,7 +261,7 @@ export default function LoginScreen() {
           <TouchableOpacity
             style={[styles.googleBtn, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
             onPress={handleGoogleSignIn}
-            disabled={!request || googleLoading}
+            disabled={googleLoading}
           >
             {googleLoading ? (
               <ActivityIndicator size="small" color={colors.accent} />
@@ -235,7 +306,7 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     paddingBottom: Spacing['3xl'],
   },
-  logo: { fontSize: 60, marginBottom: Spacing.sm },
+  logo: { width: 90, height: 90, marginBottom: Spacing.sm, alignSelf: 'center' },
   title: { fontSize: Typography.fontSize['2xl'], fontWeight: '900' },
   subtitle: { fontSize: Typography.fontSize.base, marginBottom: Spacing.md },
   form: { width: '100%', gap: Spacing.md },

@@ -1,19 +1,32 @@
-import React from 'react';
-import { View, Text, FlatList, StyleSheet, StatusBar } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, FlatList, StyleSheet, StatusBar, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography } from '../../src/theme';
 import { RecipeCard } from '../../src/components/RecipeCard';
 import { useSavedStore } from '../../src/store/savedStore';
 import { useRecipeStore } from '../../src/store/recipeStore';
+import { Recipe } from '../../src/types';
 
 export default function SavedScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const savedIds = useSavedStore((s) => s.savedIds);
-  const getRecipeById = useRecipeStore((s) => s.getRecipeById);
+  const getSavedSource = useSavedStore((s) => s.getSavedSource);
+  const { fetchById, addToCache } = useRecipeStore();
+  const [savedRecipes, setSavedRecipes] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const savedRecipes = savedIds.map((id) => getRecipeById(id)).filter(Boolean) as ReturnType<typeof getRecipeById>[];
+  useEffect(() => {
+    if (savedIds.length === 0) { setSavedRecipes([]); setLoading(false); return; }
+    setLoading(true);
+    Promise.all(savedIds.map((id) => fetchById(id, getSavedSource(id) ?? 'master'))).then((results) => {
+      const valid = results.filter(Boolean) as Recipe[];
+      setSavedRecipes(valid);
+      addToCache(valid);
+      setLoading(false);
+    });
+  }, [savedIds.join(','), getSavedSource]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -21,11 +34,13 @@ export default function SavedScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Text style={[styles.title, { color: colors.text }]}>Saved Recipes</Text>
         <Text style={[styles.count, { color: colors.textSecondary }]}>
-          {savedRecipes.length} saved
+          {loading ? '…' : `${savedRecipes.length} saved`}
         </Text>
       </View>
 
-      {savedRecipes.length === 0 ? (
+      {loading ? (
+        <ActivityIndicator color={colors.accent} style={{ marginTop: Spacing['3xl'] }} />
+      ) : savedRecipes.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emoji}>🔖</Text>
           <Text style={[styles.emptyTitle, { color: colors.text }]}>No saved recipes yet</Text>
@@ -36,8 +51,8 @@ export default function SavedScreen() {
       ) : (
         <FlatList
           data={savedRecipes}
-          keyExtractor={(item) => item!.id}
-          renderItem={({ item }) => item ? <RecipeCard recipe={item} horizontal /> : null}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <RecipeCard recipe={item} horizontal />}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
         />

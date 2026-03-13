@@ -1,338 +1,283 @@
-# 🍛 MealMitra
+# MealMitra
 
-**MealMitra** is a modern, offline-first Indian recipe app built with React Native & Expo. It helps users discover recipes, cook with step-by-step guidance, plan weekly meals, manage grocery lists, and get AI-powered cooking help — all for free, with no ads and no subscriptions.
+MealMitra is an Expo + React Native recipe and meal-planning app focused on Indian food.
+
+It combines:
+- Supabase-backed recipe discovery and search
+- AI recipe generation from available ingredients
+- AI diet planning with public-plan reuse
+- Weekly planner + grocery flow
+- Profile-driven recommendations
+
+This README is updated to match the current codebase and migration system.
 
 ---
 
-## 📱 Screenshots
+## Screenshots
 
 | Login | Sign Up | Home |
-|-------|---------|------|
+|---|---|---|
 | ![Login](./assets/images/loginpage.png) | ![Signup](./assets/images/signuppage.png) | ![Home](./assets/images/homepage.png) |
 
 | Search | Saved Recipes | Meal Planner |
-|--------|---------------|--------------|
+|---|---|---|
 | ![Search](./assets/images/searchpage.png) | ![Saved](./assets/images/savedrecipe.png) | ![Planner](./assets/images/plannerpage.png) |
 
 | Profile | Settings |
-|---------|----------|
+|---|---|
 | ![Profile](./assets/images/userprofile.png) | ![Settings](./assets/images/settingpage.png) |
 
 ---
 
-## ✨ Features
+## Feature Overview
 
-### 🔍 Recipe Discovery
-- Browse **10,000+ Indian recipes** across 12+ cuisines
-- Full-text search by name, cuisine, or ingredient (powered by **Fuse.js**)
-- Filter by diet type, difficulty, cook time, and cuisine
-- Featured recipes and quick recipes (≤ 20 min) sections on home screen
-- Browse **By Cuisine** (Gujarati, Punjabi, Rajasthani, Bengali, South Indian, and more)
+### Recipe Discovery
+- Search and filter recipes by title, cuisine, diet, difficulty, cook time, and calories.
+- Curated sections: Featured, Trending, and Quick recipes.
+- Cuisine-first browsing from the home screen.
+- Personalized suggestions using user health profile and goals.
 
-### 🍳 Cooking Mode
-- Interactive step-by-step cooking interface
-- Per-step timers
-- Ingredient scaling by number of servings
+### Cooking Mode
+- Full-screen step-by-step cooking view.
+- Per-step timer with start, pause, and resume.
+- Background-safe timer behavior with local notifications via `expo-notifications`.
+- Vibration feedback on timer completion.
 
-### 📊 Nutrition Information
-- Per-serving macros: protein, carbs, fat, fiber, sugar
-- Calorie count displayed on every recipe card
+### AI Assistant ("What can I cook?")
+- Input available ingredients.
+- App first searches recipe DB by ingredient match.
+- If no strong match, generates AI recipes through Groq (`llama-3.3-70b-versatile`).
+- AI recipes can be saved, uploaded (public), and added to meal planner slots.
 
-### 🤖 AI Cooking Assistant
-- Ask cooking questions
-- Get ingredient substitution suggestions
-- Powered by an open-source LLM API
+### AI Diet Planner
+- Uses user fitness profile to calculate BMR/TDEE and target calories/protein.
+- Supports goals: `muscle_gain`, `fat_loss`, `maintain`, `weight_gain`.
+- Supports diet types: `vegetarian`, `non_veg`, `vegan`, `eggetarian`.
+- Public-plan-first flow: exact public plan matches are reused before generating a new one.
+- Generated plans can be saved, uploaded publicly, and mapped into planner meals.
 
-### 📅 Meal Planner
-- Plan meals for the entire week (Mon–Sun)
-- Separate slots for Breakfast, Lunch, Dinner, and Snack
-- Add recipes directly from any recipe detail page
+### Planner + Grocery
+- Weekly planner for Breakfast/Lunch/Dinner/Snack.
+- Add recipes to specific day + slot.
+- Generate grocery list from selected planner days.
+- Remove single meals or clear full week.
 
-### 🛒 Grocery List
-- Auto-generated shopping list from your meal plan
-- Manage and check off items as you shop
-
-### 🔖 Saved Recipes
-- Bookmark any recipe with one tap
-- View all saved recipes in a dedicated tab
-- Save count shown on your profile
-
-### 👤 User Profiles
-- Guest mode — use the full app without an account
-- Sign up / Sign in with email & password
-- Continue with Google (OAuth)
-- Profile stats: Saved, Reviews, Recipes uploaded
-- Skill badge (e.g., "Beginner Cook")
-
-### ⚙️ Settings
-- **Dark Mode** — Auto (System), Light, or Dark
-- **Default Diet** filter — All, Vegetarian, Vegan, Non-Vegetarian, Eggetarian
-- **Units** — Metric (g, ml) or Imperial
-- Edit Profile & Change Password
-- Privacy Policy & Help & Support
+### Profiles, Auth, and Sync
+- Supabase auth (email/password + Google OAuth + guest mode in app flow).
+- User profile and health data synced to `user_profiles`.
+- Recent searches and recently viewed recipes synced to profile columns.
 
 ---
 
-## 🏗️ Tech Stack
+## Tech Stack
 
-| Layer | Technology |
+| Layer | Tech |
 |---|---|
-| Framework | [React Native](https://reactnative.dev/) + [Expo](https://expo.dev/) ~54 |
+| Mobile | React Native 0.81 + Expo SDK 54 |
+| Routing | Expo Router |
 | Language | TypeScript |
-| Navigation | [Expo Router](https://expo.github.io/router/) (file-based routing) |
-| State Management | [Zustand](https://zustand-demo.pmnd.rs/) |
-| Backend / Auth | [Supabase](https://supabase.com/) (auth, storage) |
-| Local Storage | AsyncStorage |
-| Search | [Fuse.js](https://fusejs.io/) (fuzzy full-text search) |
-| Animations | [React Native Reanimated](https://docs.swmansion.com/react-native-reanimated/) |
-| Icons | [@expo/vector-icons](https://docs.expo.dev/guides/icons/) |
-| Auth OAuth | [expo-auth-session](https://docs.expo.dev/versions/latest/sdk/auth-session/) |
+| State | Zustand + AsyncStorage persist |
+| Backend | Supabase (Auth, Postgres, RLS, RPC) |
+| AI | Groq Chat Completions API |
+| Search | Postgres FTS + trigram + ingredient alias normalization |
+| Notifications | expo-notifications |
 
 ---
 
-## 📁 Project Structure
+## Current Architecture Notes
 
-```
+- App entry uses Expo Router (`main: expo-router/entry`).
+- `App.tsx` is not the runtime app shell for navigation; routes live under `app/`.
+- Core recipe search is Supabase-based (`src/services/searchService.ts`), not local Fuse.js indexing.
+- AI user recipes are stored in `user_ai_generated_recipes`.
+- Planner/diet-plan meal rows support polymorphic recipe references using `recipe_source` (`master` or `ai`).
+
+---
+
+## Project Structure
+
+```text
 MealMitraApp/
-├── app/                        # Expo Router screens
-│   ├── (onboarding)/           # Auth flow: slides, login, signup, profile setup
-│   ├── (tabs)/                 # Main tab screens: home, search, saved, planner, profile
-│   ├── category/[name].tsx     # Category detail screen
-│   ├── recipe/[id].tsx         # Recipe detail screen
-│   │   └── cooking/[id].tsx    # Cooking mode screen
-│   ├── add-to-planner.tsx
-│   ├── ai-assistant.tsx
-│   ├── grocery.tsx
-│   ├── my-recipes.tsx
-│   ├── notifications.tsx
-│   ├── privacy.tsx
-│   ├── recently-viewed.tsx
-│   ├── settings.tsx
-│   └── upload-recipe.tsx
+├── app/                          # Expo Router routes
+│   ├── (onboarding)/             # Login/signup/profile setup flow
+│   ├── (tabs)/                   # Home/search/saved/planner/profile tabs
+│   ├── ai-assistant.tsx          # Ingredient-based assistant
+│   ├── recipe/[id].tsx           # Recipe detail
+│   ├── recipe/cooking/[id].tsx   # Cooking mode with timers
+│   └── ...
 ├── src/
-│   ├── components/             # Reusable UI components
-│   │   ├── ConfirmModal.tsx
-│   │   ├── CuisineCard.tsx
-│   │   ├── FilterChip.tsx
-│   │   ├── Header.tsx
-│   │   ├── NutritionBadge.tsx
-│   │   ├── RecipeCard.tsx
-│   │   ├── SearchBar.tsx
-│   │   └── Toast.tsx
-│   ├── data/
-│   │   └── recipes.ts          # Local recipe database
-│   ├── hooks/
-│   │   └── useToast.ts
-│   ├── services/
-│   │   ├── searchService.ts    # Fuse.js search index
-│   │   └── supabase.ts         # Supabase client
-│   ├── store/                  # Zustand state stores
-│   │   ├── groceryStore.ts
-│   │   ├── plannerStore.ts
-│   │   ├── recipeStore.ts
-│   │   ├── savedStore.ts
-│   │   └── userStore.ts
-│   ├── theme/
-│   │   ├── index.ts            # Color tokens (light & dark)
-│   │   └── useTheme.ts
-│   └── types/
-│       └── index.ts            # TypeScript interfaces
-├── assets/
-│   └── images/
-├── android/                    # Android native project
-├── app.json                    # Expo app config
-├── package.json
-└── tsconfig.json
+│   ├── components/               # UI components (incl. AiDietPlannerModal)
+│   ├── data/                     # Seed recipe datasets by cuisine
+│   ├── services/                 # Supabase, search, AI diet/recipe services
+│   ├── store/                    # Zustand stores (planner, recipes, user, saved, grocery)
+│   ├── theme/                    # Theme tokens + hook
+│   └── types/                    # App and DB mapping types
+├── scripts/
+│   ├── seed-recipes.ts           # Seed `master_recipes` via service role
+│   ├── check-dupes.ts            # Duplicate title check in seeded app recipes
+│   └── migrate.js                # currently empty placeholder
+├── supabase/
+│   └── migrations/               # SQL migrations (v3 schema + fixes)
+├── app.json
+└── package.json
 ```
 
 ---
 
-## 🍽️ Supported Cuisines
+## Environment Variables
 
-- Gujarati
-- Punjabi
-- Rajasthani
-- Bengali
-- Maharashtrian
-- South Indian
-- North Indian
-- Hyderabadi
-- Street Food
-- Desserts
-- Indo-Chinese
-- and more…
+Create `.env` in project root for app runtime:
+
+```env
+EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+EXPO_PUBLIC_GROQ_API_KEY=your_groq_api_key
+
+# OAuth (if using Google login flow)
+EXPO_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+EXPO_PUBLIC_GOOGLE_CLIENT_SECRET=your-google-client-secret
+```
+
+Notes:
+- `.env.example` currently includes Google OAuth keys only.
+- For seed scripts, create `scripts/.env.seed`:
+
+```env
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
 
 ---
 
-## 🚀 Getting Started
+## Setup
 
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18+)
-- [Expo CLI](https://docs.expo.dev/get-started/installation/) — `npm install -g expo-cli`
-- [Android Studio](https://developer.android.com/studio) (for Android emulator) or a physical device with Expo Go
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/your-username/MealMitraApp.git
-cd MealMitraApp
-```
-
-### 2. Install dependencies
+### 1) Install dependencies
 
 ```bash
 npm install
 ```
 
-### 3. Configure environment variables
+### 2) Configure env files
 
-Copy the example env file and fill in your Supabase credentials:
+- Add root `.env` for app runtime.
+- Add `scripts/.env.seed` for seeding tools.
+
+### 3) Run Supabase migrations
+
+Apply SQL files from `supabase/migrations/` in ascending filename order.
+
+Important migrations in current flow include:
+- `20260312_v3_reset.sql`
+- `20260312_add_recipe_slug.sql`
+- `20260313_user_ai_recipes.sql`
+- `20260313_ai_recipe_reference_fix.sql`
+- `20260313_master_recipes_nutrition_defaults.sql`
+- `20260313_recent_searches_user_profiles.sql`
+- `20260313_recently_viewed_user_profiles.sql`
+- `20260314_diet_planner_system.sql`
+- `20260314_diet_planner_fk_hotfix.sql`
+- `canonical_inredients.sql`
+
+### 4) Start app
 
 ```bash
-cp .env.example .env
+npm start
 ```
 
-```env
-EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-
-### 4. Start the development server
+### 5) (Optional) seed master recipes
 
 ```bash
-npx expo start --clear
+npm run seed
 ```
 
-Then press `a` to open on Android emulator, `i` for iOS simulator, or scan the QR code with **Expo Go** on your physical device.
+---
 
-### 5. Build a release APK (Android)
+## Available Scripts
+
+| Command | Purpose |
+|---|---|
+| `npm start` | Start Expo dev server |
+| `npm run android` | Run native Android build |
+| `npm run ios` | Run native iOS build |
+| `npm run web` | Run web target |
+| `npm run migrate` | Placeholder script (`scripts/migrate.js` currently empty) |
+| `npm run seed` | Seed recipes into `master_recipes` |
+| `npm run seed:reset` | Seed script with reset flag |
+| `npm run duplicate` | Check duplicates in seeded app recipes |
+
+---
+
+## Supabase Data Model (Current)
+
+Key tables used by the app:
+- `user_profiles`
+  - profile + fitness fields
+  - includes `recent_searches` and `recent_viewed_recipe_ids`
+- `master_recipes`
+  - canonical public/app/user-uploaded recipes
+  - FTS/trigram/index-heavy search fields
+- `user_ai_generated_recipes`
+  - user-owned/generated AI recipes
+  - can be private or public
+- `saved_recipes`
+  - bookmarks with `recipe_source` + `recipe_id`
+- `planner_meals`
+  - weekly planner entries with source-aware recipe refs
+- `diet_plans`
+  - saved/generated/public diet plan payloads
+- `diet_plan_meals`
+  - normalized meal-slot rows attached to a diet plan
+- `ingredient_aliases`
+  - alias-to-canonical ingredient mapping for better search matching
+
+All critical tables are protected by RLS policies.
+
+---
+
+## Deep Linking
+
+Configured in `app.json`:
+- App scheme: `mealmitra`
+- Google OAuth callback: `com.mealmitra.app://oauth2redirect/google`
+- Auth confirm callback: `mealmitra://auth/confirm`
+- Auth callback: `mealmitra://auth/callback`
+
+---
+
+## Build (Android)
+
+From project root:
 
 ```bash
 cd android
 ./gradlew assembleRelease
 ```
 
-The APK will be at `android/app/build/outputs/apk/release/app-release.apk`.
+On Windows PowerShell use:
 
----
-
-## 🔐 Authentication
-
-MealMitra supports three sign-in methods:
-
-| Method | Description |
-|--------|-------------|
-| Email & Password | Classic sign up / sign in via Supabase Auth |
-| Google OAuth | One-tap sign in using `expo-auth-session` |
-| Guest Mode | Use the full app without any account |
-
----
-
-## 🗂️ Data Model
-
-```typescript
-interface Recipe {
-  id: string;
-  name: string;
-  cuisine: string;
-  diet: 'Vegetarian' | 'Non-Vegetarian' | 'Vegan' | 'Eggetarian';
-  difficulty: 'Easy' | 'Medium' | 'Hard';
-  cook_time: number;       // minutes
-  prep_time: number;       // minutes
-  servings: number;
-  calories: number;
-  rating: number;
-  reviews: number;
-  image: string;
-  description: string;
-  ingredients: Ingredient[];
-  preparation: PreparationStep[];
-  nutrition: Nutrition;    // protein, carbs, fat, fiber, sugar
-  equipment: string[];
-  steps: CookingStep[];    // step number, instruction, time
-  tips: string[];
-  tags: string[];
-}
+```powershell
+cd android
+.\gradlew.bat assembleRelease
 ```
 
----
-
-## 🎨 Design System
-
-| Token | Value |
-|-------|-------|
-| Primary Accent | `#FF6B35` (orange) |
-| Dark Background | `#111111` |
-| Light Background | `#FFFFFF` |
-| Surface (dark) | `#1E1E1E` |
-| Text Primary | `#FFFFFF` / `#111111` |
-| Success | `#22C55E` |
-| Error | `#EF4444` |
-| Warning / Stars | `#F59E0B` |
-
-The app follows the system theme preference and supports **automatic dark/light mode switching**.
+Release APK path:
+- `android/app/build/outputs/apk/release/app-release.apk`
 
 ---
 
-## 🛠️ Available Scripts
+## Troubleshooting
 
-| Command | Description |
-|---------|-------------|
-| `npm start` | Start Expo dev server |
-| `npm run android` | Run on Android device/emulator |
-| `npm run ios` | Run on iOS simulator |
-| `npm run web` | Run in web browser |
-
----
-
-## 📦 Key Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `expo` | ~54.0.0 | Core framework |
-| `expo-router` | ~6.0.23 | File-based navigation |
-| `@supabase/supabase-js` | ^2.98.0 | Auth & backend |
-| `zustand` | ^5.0.11 | State management |
-| `fuse.js` | ^7.1.0 | Fuzzy search |
-| `react-native-reanimated` | ~4.1.1 | Animations |
-| `expo-auth-session` | ~7.0.10 | Google OAuth |
-| `expo-sqlite` | ~16.0.10 | Local database |
+- App fails with Supabase client errors:
+  - confirm `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` are set in root `.env`.
+- AI generation fails:
+  - confirm `EXPO_PUBLIC_GROQ_API_KEY` is set and valid.
+- Seed script fails with missing credentials:
+  - confirm `scripts/.env.seed` exists with service role key.
+- Planner insert errors with recipe reference:
+  - ensure latest 20260313/20260314 migrations were applied (source-aware reference triggers).
 
 ---
 
-## 🗺️ Roadmap
+## License
 
-- [ ] Upload custom recipes
-- [ ] AI-generated meal plans
-- [ ] Push notifications for meal reminders
-- [ ] Recipe ratings & reviews
-- [ ] Social sharing
-- [ ] iOS release
-- [ ] Expand to 50,000+ recipes
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please open an issue first to discuss what you'd like to change.
-
-1. Fork the repository
-2. Create your feature branch: `git checkout -b feature/amazing-feature`
-3. Commit your changes: `git commit -m 'Add amazing feature'`
-4. Push to the branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
----
-
-## 📄 License
-
-This project is private. All rights reserved.
-
----
-
-## 👨‍💻 Author
-
-Built with ❤️ for home cooks everywhere.
-
-> *"MealMitra — Your kitchen companion."*
+Private project. All rights reserved.

@@ -8,6 +8,7 @@ interface NutritionBadgeProps {
   carbs: number;
   fat: number;
   fiber: number;
+  sugar: number;
   calories: number;
 }
 
@@ -34,7 +35,7 @@ const NutrientItem: React.FC<NutrientItemProps> = ({ label, value, unit, color }
 };
 
 export const NutritionBadge: React.FC<NutritionBadgeProps> = ({
-  protein, carbs, fat, fiber, calories,
+  protein, carbs, fat, fiber, sugar, calories,
 }) => {
   const { colors } = useTheme();
 
@@ -50,6 +51,7 @@ export const NutritionBadge: React.FC<NutritionBadgeProps> = ({
         <NutrientItem label="Carbs" value={carbs} unit="g" color="#F59E0B" />
         <NutrientItem label="Fat" value={fat} unit="g" color="#EF4444" />
         <NutrientItem label="Fiber" value={fiber} unit="g" color="#22C55E" />
+        <NutrientItem label="Sugar" value={sugar} unit="g" color="#06B6D4" />
       </View>
     </View>
   );

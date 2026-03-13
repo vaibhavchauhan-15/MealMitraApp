@@ -1,30 +1,40 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   FlatList,
   StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography } from '../../src/theme';
-import { useRecipeStore } from '../../src/store/recipeStore';
 import { RecipeCard } from '../../src/components/RecipeCard';
+import { getRecipesByCuisine } from '../../src/services/searchService';
+import { useRecipeStore } from '../../src/store/recipeStore';
+import { Recipe } from '../../src/types';
 
 export default function CategoryScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { name } = useLocalSearchParams<{ name: string }>();
-  const recipes = useRecipeStore((s) => s.recipes);
+  const addToCache = useRecipeStore((s) => s.addToCache);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const decoded = decodeURIComponent(name ?? '');
-  const filtered = recipes.filter(
-    (r) => r.cuisine.toLowerCase() === decoded.toLowerCase()
-  );
+
+  useEffect(() => {
+    getRecipesByCuisine(decoded, 50).then((data) => {
+      setRecipes(data);
+      addToCache(data);
+      setLoading(false);
+    });
+  }, [decoded]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -36,11 +46,13 @@ export default function CategoryScreen() {
           {decoded}
         </Text>
         <Text style={[styles.count, { color: colors.textSecondary }]}>
-          {filtered.length} recipes
+          {loading ? '…' : `${recipes.length} recipes`}
         </Text>
       </View>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <ActivityIndicator color={colors.accent} style={{ marginTop: Spacing['3xl'] }} />
+      ) : recipes.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyEmoji}>🍽️</Text>
           <Text style={[styles.emptyTitle, { color: colors.text }]}>No recipes found</Text>
@@ -50,7 +62,7 @@ export default function CategoryScreen() {
         </View>
       ) : (
         <FlatList
-          data={filtered}
+          data={recipes}
           keyExtractor={(r) => r.id}
           renderItem={({ item }) => <RecipeCard recipe={item} />}
           numColumns={2}

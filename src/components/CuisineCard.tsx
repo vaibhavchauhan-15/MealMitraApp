@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../theme/useTheme';
-import { BorderRadius, Spacing, Typography, Shadow } from '../theme';
+import { Spacing, Typography } from '../theme';
+import { FallbackImage } from './FallbackImage';
 
 interface CuisineCardProps {
   name: string;
@@ -47,41 +48,44 @@ export const CuisineCard: React.FC<CuisineCardProps> = ({ name, recipeCount }) =
 
   return (
     <TouchableOpacity
-      style={[styles.card, { ...Shadow.sm }]}
+      style={styles.card}
       onPress={() => router.push(`/category/${encodeURIComponent(name)}` as any)}
       activeOpacity={0.85}
     >
-      {image ? (
-        <Image source={{ uri: image }} style={styles.image} resizeMode="cover" />
-      ) : (
-        <View style={[styles.emojiContainer, { backgroundColor: colors.accentLight }]}>
-          <Text style={styles.emoji}>{emoji}</Text>
-        </View>
-      )}
-      <View style={styles.overlay} />
-      <View style={styles.content}>
-        <Text style={styles.name}>{name}</Text>
-        {recipeCount !== undefined && (
-          <Text style={styles.count}>{recipeCount} recipes</Text>
+      <View style={[styles.thumb, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+        {image ? (
+          <FallbackImage uri={image} style={styles.image} resizeMode="cover" />
+        ) : (
+          <View style={[styles.emojiContainer, { backgroundColor: colors.accentLight }]}>
+            <Text style={styles.emoji}>{emoji}</Text>
+          </View>
         )}
       </View>
+      <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{name}</Text>
+      {recipeCount !== undefined && (
+        <Text style={[styles.count, { color: colors.textSecondary }]}>{recipeCount} recipes</Text>
+      )}
     </TouchableOpacity>
   );
 };
 
 const styles = StyleSheet.create({
   card: {
-    width: 130,
-    height: 100,
-    borderRadius: BorderRadius.lg,
+    width: 88,
+    marginRight: Spacing.base,
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  thumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     overflow: 'hidden',
-    marginRight: Spacing.sm,
-    position: 'relative',
+    borderWidth: 1,
   },
   image: {
     width: '100%',
     height: '100%',
-    position: 'absolute',
   },
   emojiContainer: {
     width: '100%',
@@ -90,26 +94,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emoji: {
-    fontSize: 36,
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.38)',
-  },
-  content: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: Spacing.sm,
+    fontSize: 28,
   },
   name: {
-    color: '#FFF',
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
     fontWeight: '700',
+    textAlign: 'center',
   },
   count: {
-    color: 'rgba(255,255,255,0.8)',
     fontSize: Typography.fontSize.xs,
+    textAlign: 'center',
   },
 });

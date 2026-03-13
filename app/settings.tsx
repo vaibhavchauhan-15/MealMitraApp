@@ -5,26 +5,27 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Switch,
 } from 'react-native';
 import { ConfirmModal } from '../src/components/ConfirmModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useColorScheme } from 'react-native';
 import { useTheme } from '../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../src/theme';
 import { useUserStore } from '../src/store/userStore';
+import type { ThemePreference } from '../src/store/userStore';
 
-const CUISINES = ['North Indian', 'South Indian', 'Street Food', 'Mughlai', 'Bengali', 'Gujarati', 'Punjabi'];
-const DIET_OPTIONS = ['Vegetarian', 'Vegan', 'Non-Vegetarian', 'Jain'];
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: string }[] = [
+  { value: 'system', label: 'System', icon: 'phone-portrait-outline' },
+  { value: 'light',  label: 'Light',  icon: 'sunny-outline' },
+  { value: 'dark',   label: 'Dark',   icon: 'moon-outline' },
+];
 
 export default function SettingsScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { profile, updateProfile, logout } = useUserStore();
-  const [units, setUnits] = useState<'metric' | 'imperial'>('metric');
+  const { logout, themePreference, setThemePreference } = useUserStore();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   const handleLogout = () => setShowLogoutModal(true);
@@ -78,51 +79,59 @@ export default function SettingsScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing['2xl'] }]}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── Appearance ───────────────────────────────────────────────────── */}
         <SectionLabel label="Appearance" />
         <View style={[styles.section, { backgroundColor: colors.surface }]}>
-          <View style={styles.row}>
+          <View style={[styles.row, { backgroundColor: colors.surface }]}>
             <View style={[styles.iconWrap, { backgroundColor: colors.accentLight }]}>
-              <Ionicons name="moon-outline" size={18} color={colors.accent} />
+              <Ionicons name="contrast-outline" size={18} color={colors.accent} />
             </View>
-            <Text style={[styles.rowLabel, { color: colors.text }]}>Dark Mode</Text>
-            <View style={styles.rowRight}>
-              <Text style={[styles.rowValue, { color: colors.textSecondary }]}>
-                {isDark ? 'On' : 'Off'} (System)
-              </Text>
+            <Text style={[styles.rowLabel, { color: colors.text }]}>Theme</Text>
+          </View>
+          {/* 3-way segment: System / Light / Dark */}
+          <View style={[styles.segmentWrapper, { paddingHorizontal: Spacing.base, paddingBottom: Spacing.base }]}>
+            <View style={[styles.segmentTrack, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              {THEME_OPTIONS.map((opt) => {
+                const active = themePreference === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[
+                      styles.segmentItem,
+                      active && { backgroundColor: colors.accent },
+                    ]}
+                    onPress={() => setThemePreference(opt.value)}
+                    activeOpacity={0.75}
+                  >
+                    <Ionicons
+                      name={opt.icon as any}
+                      size={14}
+                      color={active ? '#FFF' : colors.textSecondary}
+                    />
+                    <Text style={[styles.segmentLabel, { color: active ? '#FFF' : colors.textSecondary }]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         </View>
 
-        <SectionLabel label="Preferences" />
-        <View style={[styles.section, { backgroundColor: colors.surface }]}>
-          <SettingRow
-            icon="restaurant-outline"
-            label="Default Diet"
-            value={profile?.dietPreference ?? 'All'}
-          />
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <SettingRow
-            icon="scale-outline"
-            label="Units"
-            value={units === 'metric' ? 'Metric (g, ml)' : 'Imperial (oz, fl oz)'}
-            onPress={() => setUnits((u) => (u === 'metric' ? 'imperial' : 'metric'))}
-          />
-        </View>
-
+        {/* ── Account ──────────────────────────────────────────────────────── */}
         <SectionLabel label="Account" />
         <View style={[styles.section, { backgroundColor: colors.surface }]}>
-          <SettingRow icon="person-outline" label="Edit Profile" onPress={() => router.back()} />
+          <SettingRow icon="person-outline" label="Edit Profile" onPress={() => router.push('/edit-profile' as any)} />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <SettingRow icon="lock-closed-outline" label="Change Password" onPress={() => {}} />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <SettingRow icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => router.push('/privacy' as any)} />
         </View>
 
+        {/* ── About ────────────────────────────────────────────────────────── */}
         <SectionLabel label="About" />
         <View style={[styles.section, { backgroundColor: colors.surface }]}>
           <SettingRow icon="information-circle-outline" label="Version" value="1.0.0" />
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <SettingRow icon="help-circle-outline" label="Help & Support" onPress={() => router.push('/help' as any)} />
         </View>
 
         <TouchableOpacity
@@ -191,6 +200,26 @@ const styles = StyleSheet.create({
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   rowValue: { fontSize: Typography.fontSize.sm },
   divider: { height: 1, marginHorizontal: Spacing.base },
+  segmentWrapper: {},
+  segmentTrack: {
+    flexDirection: 'row',
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  segmentItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+  },
+  segmentLabel: {
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '700',
+  },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',

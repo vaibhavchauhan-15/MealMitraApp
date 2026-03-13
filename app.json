@@ -5,12 +5,12 @@
     "scheme": "mealmitra",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo/logo.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/logo/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FF6B35"
+      "backgroundColor": "#FDF5EB"
     },
     "ios": {
       "supportsTablet": true
@@ -18,10 +18,9 @@
     "android": {
       "package": "com.mealmitra.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#FDF5EB",
+        "foregroundImage": "./assets/logo/logo.png",
+        "monochromeImage": "./assets/logo/logo.png"
       },
       "predictiveBackGestureEnabled": false,
       "intentFilters": [
@@ -62,7 +61,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/logo/logo.png"
     },
     "plugins": [
       "expo-router",

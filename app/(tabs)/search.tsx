@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,15 +7,18 @@ import {
   StyleSheet,
   TouchableOpacity,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { SearchBar } from '../../src/components/SearchBar';
 import { FilterChip } from '../../src/components/FilterChip';
 import { RecipeCard } from '../../src/components/RecipeCard';
-import { searchRecipes, DIET_FILTERS, DIFFICULTY_FILTERS, CUISINE_LIST } from '../../src/services/searchService';
-import { RecipeFilters } from '../../src/types';
+import { searchRecipes, getTotalRecipeCount, DIET_FILTERS, DIFFICULTY_FILTERS, CUISINE_LIST } from '../../src/services/searchService';
+import { RecipeFilters, Recipe } from '../../src/types';
+import { useRecipeStore } from '../../src/store/recipeStore';
 
 const TIME_FILTERS = [
   { label: '≤ 15 min', value: 15 },
@@ -24,16 +27,65 @@ const TIME_FILTERS = [
 ];
 
 export default function SearchScreen() {
+  const router = useRouter();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<RecipeFilters>({});
   const [showFilters, setShowFilters] = useState(false);
+  const [results, setResults] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [totalCount, setTotalCount] = useState(1000);
+  const addToCache = useRecipeStore((s) => s.addToCache);
+  const recentSearches = useRecipeStore((s) => s.recentSearches);
+  const addRecentSearch = useRecipeStore((s) => s.addRecentSearch);
+  const clearRecentSearches = useRecipeStore((s) => s.clearRecentSearches);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const results = useMemo(
-    () => searchRecipes(query, filters),
-    [query, filters]
-  );
+  // Fetch the real recipe count once on mount
+  useEffect(() => {
+    getTotalRecipeCount().then(setTotalCount);
+  }, []);
+
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const hasActiveSearch = query.trim().length > 0 || activeFilterCount > 0;
+
+  // Debounced async search (only when there is a query or active filters)
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (!hasActiveSearch) {
+      setLoading(false);
+      setResults([]);
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      const data = await searchRecipes(query, filters, totalCount);
+      setResults(data);
+      addToCache(data);
+      setLoading(false);
+    }, 350);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query, filters, totalCount, hasActiveSearch, addToCache]);
+
+  // Save search history only after user stops typing for a while.
+  useEffect(() => {
+    if (saveSearchDebounceRef.current) clearTimeout(saveSearchDebounceRef.current);
+
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return;
+
+    saveSearchDebounceRef.current = setTimeout(() => {
+      addRecentSearch(normalizedQuery);
+    }, 1200);
+
+    return () => {
+      if (saveSearchDebounceRef.current) clearTimeout(saveSearchDebounceRef.current);
+    };
+  }, [query, addRecentSearch]);
 
   const toggleDiet = useCallback((diet: string) => {
     setFilters((f) => ({ ...f, diet: f.diet === diet ? undefined : diet }));
@@ -56,7 +108,7 @@ export default function SearchScreen() {
     setFilters({});
   }, []);
 
-  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const shouldShowRecentSearches = !loading && !hasActiveSearch;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -65,6 +117,12 @@ export default function SearchScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Search Recipes</Text>
+        <TouchableOpacity
+          style={[styles.plansBtn, { backgroundColor: colors.surface }]}
+          onPress={() => router.push('/ai-plans' as any)}
+        >
+          <Text style={[styles.plansBtnText, { color: colors.accent }]}>Browse AI Plans</Text>
+        </TouchableOpacity>
         <View style={styles.searchRow}>
           <View style={{ flex: 1 }}>
             <SearchBar
@@ -153,13 +211,50 @@ export default function SearchScreen() {
 
       {/* Results */}
       <View style={styles.resultsHeader}>
-        <Text style={[styles.resultsCount, { color: colors.textSecondary }]}>
-          {results.length} recipe{results.length !== 1 ? 's' : ''}
-          {query ? ` for "${query}"` : ''}
-        </Text>
+        {shouldShowRecentSearches ? (
+          <View style={styles.recentHeaderRow}>
+            <Text style={[styles.resultsCount, { color: colors.textSecondary }]}>Recent searches</Text>
+            {recentSearches.length > 0 && (
+              <TouchableOpacity onPress={clearRecentSearches}>
+                <Text style={[styles.clearAllText, { color: colors.accent }]}>Clear</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <Text style={[styles.resultsCount, { color: colors.textSecondary }]}>
+            {loading ? 'Searching…' : `${results.length} recipe${results.length !== 1 ? 's' : ''}${query ? ` for "${query}"` : ''}`}
+          </Text>
+        )}
       </View>
 
-      {results.length === 0 ? (
+      {shouldShowRecentSearches ? (
+        recentSearches.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyEmoji}>🔎</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>Search recipes</Text>
+            <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
+              Type recipe title, ingredient, cuisine, or use filters to see results.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={recentSearches}
+            keyExtractor={(item) => item}
+            contentContainerStyle={styles.recentList}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[styles.recentItem, { backgroundColor: colors.surface }]}
+                onPress={() => setQuery(item)}
+              >
+                <Text style={[styles.recentItemText, { color: colors.text }]}>{item}</Text>
+              </TouchableOpacity>
+            )}
+            showsVerticalScrollIndicator={false}
+          />
+        )
+      ) : loading ? (
+        <ActivityIndicator color={colors.accent} style={{ marginTop: Spacing['2xl'] }} />
+      ) : results.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyEmoji}>🔍</Text>
           <Text style={[styles.emptyTitle, { color: colors.text }]}>No recipes found</Text>
@@ -189,7 +284,18 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: Typography.fontSize['2xl'],
     fontWeight: '800',
+    marginBottom: Spacing.sm,
+  },
+  plansBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.xl,
     marginBottom: Spacing.md,
+  },
+  plansBtnText: {
+    fontWeight: '700',
+    fontSize: Typography.fontSize.sm,
   },
   searchRow: {
     flexDirection: 'row',
@@ -233,9 +339,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.base,
     paddingVertical: Spacing.sm,
   },
+  recentHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   resultsCount: {
     fontSize: Typography.fontSize.sm,
     fontWeight: '500',
+  },
+  recentList: {
+    paddingHorizontal: Spacing.base,
+    paddingBottom: Spacing['2xl'],
+    gap: Spacing.sm,
+  },
+  recentItem: {
+    borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+  },
+  recentItemText: {
+    fontSize: Typography.fontSize.base,
+    fontWeight: '600',
   },
   list: {
     paddingHorizontal: Spacing.base,

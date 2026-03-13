@@ -54,7 +54,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="search"
         options={{
-          title: 'Search',
+          title: 'Discover',
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name={focused ? 'search' : 'search-outline'} color={color} focused={focused} />
           ),
@@ -72,7 +72,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="planner"
         options={{
-          title: 'Planner',
+          title: 'Meal Plan',
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name={focused ? 'calendar' : 'calendar-outline'} color={color} focused={focused} />
           ),

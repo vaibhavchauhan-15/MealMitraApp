@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, StatusBar } from 'react-native';
+import { View, Text, Image, StyleSheet, StatusBar } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/theme/useTheme';
 import { Typography } from '../../src/theme';
@@ -17,11 +17,11 @@ export default function SplashScreen() {
   }, []);
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.accent }]}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.accent} />
-      <Text style={styles.logo}>🍛</Text>
-      <Text style={styles.appName}>MealMitra</Text>
-      <Text style={styles.tagline}>Your Indian Recipe Companion</Text>
+    <View style={[styles.screen, { backgroundColor: '#FDF5EB' }]}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FDF5EB" />
+      <Image source={require('../../assets/logo/logo.png')} style={styles.logo} resizeMode="contain" />
+      <Text style={[styles.appName, { color: colors.accent }]}>MealMitra</Text>
+      <Text style={[styles.tagline, { color: colors.textSecondary }]}>Your Indian Recipe Companion</Text>
     </View>
   );
 }
@@ -33,16 +33,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
   },
-  logo: { fontSize: 80 },
+  logo: { width: 120, height: 120, marginBottom: 8 },
   appName: {
     fontSize: Typography.fontSize['4xl'],
     fontWeight: '900',
-    color: '#FFF',
     letterSpacing: -1,
   },
   tagline: {
     fontSize: Typography.fontSize.base,
-    color: 'rgba(255,255,255,0.85)',
     fontWeight: '500',
   },
 });

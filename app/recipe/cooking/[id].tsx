@@ -7,11 +7,18 @@ import {
   StatusBar,
   Dimensions,
   Vibration,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { useTheme } from '../../../src/theme/useTheme';
+
+// Avoid loading expo-notifications in Expo Go (SDK 53 removed remote push support,
+// which causes a warning even for local notifications).
+const isExpoGo = Constants.appOwnership === 'expo';
 import { Spacing, Typography, BorderRadius } from '../../../src/theme';
 import { useRecipeStore } from '../../../src/store/recipeStore';
 
@@ -21,34 +28,103 @@ export default function CookingModeScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, source } = useLocalSearchParams<{ id: string; source?: string }>();
+  const routeSource: 'master' | 'ai' = source === 'ai' ? 'ai' : 'master';
+  const fetchById = useRecipeStore((s) => s.fetchById);
   const getRecipeById = useRecipeStore((s) => s.getRecipeById);
-  const recipe = getRecipeById(id);
+  const [recipe, setRecipe] = React.useState(() => getRecipeById(id ?? ''));
 
+  // Fetch from Supabase if not in cache
+  React.useEffect(() => {
+    if (!id) return;
+    if (!recipe || recipe.steps.length === 0 || recipe.ingredients.length === 0) {
+      fetchById(id, routeSource).then((r) => { if (r) setRecipe(r); });
+    }
+  }, [id, recipe, routeSource, fetchById]);
+
+  const [cookingStarted, setCookingStarted] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerDone, setTimerDone] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const notifIdRef = useRef<string | null>(null);
+  // Absolute timestamp (ms) when the running timer will reach zero.
+  // Stored in a ref so AppState handler always sees the latest value.
+  const endTimeRef = useRef<number | null>(null);
+  // Mirrors timerRunning state for use inside non-reactive callbacks.
+  const timerRunningRef = useRef(false);
+
+  // Called whenever the timer reaches zero (in-foreground OR returning from background)
+  const handleTimerDone = () => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    endTimeRef.current = null;
+    timerRunningRef.current = false;
+    setTimerSeconds(0);
+    setTimerRunning(false);
+    setTimerDone(true);
+    notifIdRef.current = null; // notification already fired or is about to
+    Vibration.vibrate([0, 500, 200, 500, 200, 500]);
+  };
 
   const steps = recipe?.steps ?? [];
   const step = steps[currentStep];
   const isLast = currentStep === steps.length - 1;
 
-  // Start timer for this step
-  const startTimer = () => {
-    if (!step?.time) return;
-    setTimerSeconds(step.time * 60);
-    setTimerRunning(true);
-    setTimerDone(false);
+  // Cancel any pending timer notification
+  const cancelNotif = async () => {
+    if (isExpoGo || !notifIdRef.current) return;
+    const Notifs = require('expo-notifications') as typeof import('expo-notifications');
+    await Notifs.cancelScheduledNotificationAsync(notifIdRef.current);
+    notifIdRef.current = null;
+  };
+
+  // Schedule a notification that fires after `seconds` seconds
+  const scheduleNotif = async (seconds: number) => {
+    if (isExpoGo) return;
+    await cancelNotif();
+    const Notifs = require('expo-notifications') as typeof import('expo-notifications');
+    const notifId = await Notifs.scheduleNotificationAsync({
+      content: {
+        title: '⏱️ MealMitra — Timer Done!',
+        body: `Step ${currentStep + 1} of "${recipe?.name}" is complete. Time to move on!`,
+        sound: true,
+        data: { recipeId: id },
+      },
+      trigger: {
+        type: Notifs.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: Math.max(1, seconds),
+        channelId: 'cooking-timer',
+      },
+    });
+    notifIdRef.current = notifId;
   };
 
   const toggleTimer = () => {
-    if (!timerRunning && timerSeconds === 0) {
-      startTimer();
+    if (!timerRunning && timerSeconds === 0 && step?.time) {
+      // Fresh start
+      const secs = step.time * 60;
+      endTimeRef.current = Date.now() + secs * 1000;
+      timerRunningRef.current = true;
+      setTimerSeconds(secs);
+      setTimerRunning(true);
+      setTimerDone(false);
+      scheduleNotif(secs);
       return;
     }
-    setTimerRunning((prev) => !prev);
+    if (timerRunning) {
+      // Manual pause — cancel scheduled notification and clear end-time
+      endTimeRef.current = null;
+      timerRunningRef.current = false;
+      setTimerRunning(false);
+      cancelNotif();
+    } else if (timerSeconds > 0) {
+      // Resume — reschedule with remaining time and refresh end-time
+      endTimeRef.current = Date.now() + timerSeconds * 1000;
+      timerRunningRef.current = true;
+      setTimerRunning(true);
+      scheduleNotif(timerSeconds);
+    }
   };
 
   useEffect(() => {
@@ -56,10 +132,7 @@ export default function CookingModeScreen() {
       timerRef.current = setInterval(() => {
         setTimerSeconds((s) => {
           if (s <= 1) {
-            clearInterval(timerRef.current!);
-            setTimerRunning(false);
-            setTimerDone(true);
-            Vibration.vibrate([0, 400, 200, 400]);
+            handleTimerDone();
             return 0;
           }
           return s - 1;
@@ -71,13 +144,61 @@ export default function CookingModeScreen() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [timerRunning]);
 
-  // Reset timer when step changes
+  // AppState: when backgrounded stop the visual interval (notification keeps ticking);
+  // when foregrounded resync the countdown from the absolute end time.
   useEffect(() => {
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        // Returned to foreground
+        if (endTimeRef.current === null) return; // timer not running or manually paused
+        const remaining = Math.round((endTimeRef.current - Date.now()) / 1000);
+        if (remaining <= 0) {
+          // Timer expired while app was in background
+          handleTimerDone();
+        } else {
+          // Restart the visual countdown from the accurate remaining time
+          if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+          setTimerSeconds(remaining);
+          timerRef.current = setInterval(() => {
+            setTimerSeconds((s) => {
+              if (s <= 1) {
+                handleTimerDone();
+                return 0;
+              }
+              return s - 1;
+            });
+          }, 1000);
+        }
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        // Going to background — stop the visual interval; notification is already scheduled
+        if (timerRunningRef.current && timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+      }
+    };
+
+    const sub = AppState.addEventListener('change', handleAppState);
+    return () => sub.remove();
+  }, []);
+
+  // Reset timer & cancel notification when step changes
+  useEffect(() => {
+    endTimeRef.current = null;
+    timerRunningRef.current = false;
     setTimerSeconds(0);
     setTimerRunning(false);
     setTimerDone(false);
     if (timerRef.current) clearInterval(timerRef.current);
+    cancelNotif();
   }, [currentStep]);
+
+  // Cancel notification when screen unmounts
+  useEffect(() => {
+    return () => {
+      cancelNotif();
+    };
+  }, []);
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -95,13 +216,40 @@ export default function CookingModeScreen() {
     );
   }
 
+  // ── Pre-cooking start screen ──────────────────────────────────────
+  if (!cookingStarted) {
+    return (
+      <View style={[styles.screen, styles.startScreen]}>
+        <StatusBar barStyle="light-content" backgroundColor="#111" />
+        <Ionicons name="restaurant-outline" size={72} color="#FF6B35" style={{ marginBottom: 24 }} />
+        <Text style={styles.startLabel}>Ready to Cook?</Text>
+        <Text style={styles.startTitle} numberOfLines={3}>{recipe.name}</Text>
+        <Text style={styles.startMeta}>
+          {steps.length} step{steps.length !== 1 ? 's' : ''}
+          {(recipe as any).cookTime ? ` • ${(recipe as any).cookTime}` : ''}
+        </Text>
+        <TouchableOpacity
+          style={styles.startBtn}
+          onPress={() => setCookingStarted(true)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="play" size={24} color="#fff" />
+          <Text style={styles.startBtnText}>Start Cooking</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.backLink} onPress={() => router.back()}>
+          <Text style={styles.backLinkText}>← Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.screen, { backgroundColor: '#111' }]}>
       <StatusBar barStyle="light-content" backgroundColor="#111" />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
+        <TouchableOpacity onPress={() => { cancelNotif(); router.back(); }} style={styles.closeBtn}>
           <Ionicons name="close" size={26} color="#fff" />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
@@ -193,7 +341,7 @@ export default function CookingModeScreen() {
         <TouchableOpacity
           style={[styles.navBtn, isLast ? styles.navBtnFinish : styles.navBtnPrimary]}
           onPress={() => {
-            if (isLast) router.back();
+            if (isLast) { cancelNotif(); router.back(); }
             else setCurrentStep(currentStep + 1);
           }}
         >
@@ -323,4 +471,48 @@ const styles = StyleSheet.create({
   navBtnDisabled: { opacity: 0.4 },
   navBtnText: { color: '#fff', fontWeight: '700', fontSize: Typography.fontSize.base },
   notFound: { fontSize: Typography.fontSize.lg, textAlign: 'center', marginTop: 100 },
+
+  // Start Cooking screen
+  startScreen: {
+    backgroundColor: '#111',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing['2xl'],
+  },
+  startLabel: {
+    color: '#FF6B35',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 2.5,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  startTitle: {
+    color: '#fff',
+    fontSize: 30,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  startMeta: {
+    color: '#888',
+    fontSize: 15,
+    marginBottom: 52,
+  },
+  startBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#FF6B35',
+    paddingHorizontal: 48,
+    paddingVertical: 18,
+    borderRadius: 50,
+  },
+  startBtnText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  backLink: { marginTop: 28 },
+  backLinkText: { color: '#555', fontSize: 16 },
 });
