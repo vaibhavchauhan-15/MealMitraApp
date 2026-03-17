@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { compare } from 'npm:bcryptjs@2.4.3';
 
 type AllowedAction = 'change_email' | 'change_username' | 'change_password';
 
@@ -17,6 +18,16 @@ async function sha256(input: string) {
   const bytes = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyOtp(code: string, storedHash: string, legacySalt: string) {
+  if (storedHash.startsWith('$2')) {
+    return compare(code, storedHash);
+  }
+
+  // Keep legacy support during rolling deployments where older hashes may still exist.
+  const legacyHash = await sha256(legacySalt);
+  return legacyHash === storedHash;
 }
 
 Deno.serve(async (req) => {
@@ -84,8 +95,8 @@ Deno.serve(async (req) => {
   }
 
   const expectedHash = String(row.otp_hash);
-  const codeHash = await sha256(`${userId}:${action}:${code}`);
-  if (expectedHash !== codeHash) {
+  const isValid = await verifyOtp(code, expectedHash, `${userId}:${action}:${code}`);
+  if (!isValid) {
     const nextAttempts = Number(row.attempt_count ?? 0) + 1;
     const consumeNow = nextAttempts >= 5 ? new Date().toISOString() : null;
     await serviceClient

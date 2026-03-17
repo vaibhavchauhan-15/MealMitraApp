@@ -16,6 +16,7 @@ import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { Toast } from '../../src/components/Toast';
 import { useToast } from '../../src/hooks/useToast';
+import { useResendCooldown } from '../../src/hooks/useResendCooldown';
 import {
   AuthActionButton,
   AuthAnimatedView,
@@ -43,8 +44,11 @@ export default function ForgotPasswordScreen() {
   const [codeSent, setCodeSent] = useState(false);
   const [sending, setSending] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const { isCoolingDown, resendLabel, startCooldown } = useResendCooldown(30);
 
   const sendCode = async () => {
+    if (isCoolingDown) return;
+
     if (!email.trim()) {
       showToast('Please enter your registered email.', 'error', 'Validation');
       return;
@@ -55,11 +59,16 @@ export default function ForgotPasswordScreen() {
     setSending(false);
 
     if (error) {
-      showToast(error.message, 'error', 'Could Not Send Code');
+      if (error.message.toLowerCase().includes('rate limit')) {
+        showToast('Too many attempts. Try later.', 'error', 'Rate Limited');
+      } else {
+        showToast(error.message, 'error', 'Could Not Send Code');
+      }
       return;
     }
 
     setCodeSent(true);
+    startCooldown();
     showToast('Verification code sent. Check your inbox.', 'success', 'Code Sent');
   };
 
@@ -196,8 +205,8 @@ export default function ForgotPasswordScreen() {
                   style={styles.primaryBtn}
                 />
 
-                <TouchableOpacity onPress={sendCode} disabled={sending}>
-                  <Text style={[styles.resendLink, { color: colors.accent }]}>Resend code</Text>
+                <TouchableOpacity onPress={sendCode} disabled={sending || isCoolingDown}>
+                  <Text style={[styles.resendLink, { color: colors.accent }]}>{resendLabel}</Text>
                 </TouchableOpacity>
               </>
             )}

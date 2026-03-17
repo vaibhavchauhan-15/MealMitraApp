@@ -22,11 +22,12 @@ export function isValidSendOtpCode(code: string) {
   return OTP_CODE_REGEX.test(code.trim());
 }
 
-export async function sendOtpEmail(email: string, otp: string) {
+export async function sendOtpEmail(email: string, otp: string, purpose = 'generic') {
   const { data, error } = await supabase.functions.invoke('send-otp', {
     body: {
       email: email.trim().toLowerCase(),
       otp: otp.trim(),
+      purpose: purpose.trim().toLowerCase(),
     },
   });
 

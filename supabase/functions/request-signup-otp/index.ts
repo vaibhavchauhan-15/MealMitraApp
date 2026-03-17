@@ -1,6 +1,10 @@
 // @ts-nocheck
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+const RESEND_COOLDOWN_MS = 30_000;
+const MAX_RESENDS_PER_HOUR = 5;
+const RESEND_WINDOW_MS = 60 * 60 * 1000;
+
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
@@ -57,14 +61,29 @@ Deno.serve(async (req) => {
 
   const { data: existing } = await serviceClient
     .from('signup_otps')
-    .select('last_sent_at')
+    .select('last_sent_at,resend_count,resend_window_started_at')
     .eq('email', email)
     .maybeSingle();
 
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
   const lastSentMs = existing?.last_sent_at ? new Date(String(existing.last_sent_at)).getTime() : 0;
-  if (lastSentMs && Date.now() - lastSentMs < 30_000) {
+  if (lastSentMs && now - lastSentMs < RESEND_COOLDOWN_MS) {
     return json(429, { error: 'Please wait 30 seconds before requesting a new code.' });
   }
+
+  const windowStartMs = existing?.resend_window_started_at
+    ? new Date(String(existing.resend_window_started_at)).getTime()
+    : 0;
+  const resendCount = Number(existing?.resend_count ?? 0);
+  const withinWindow = windowStartMs > 0 && now - windowStartMs < RESEND_WINDOW_MS;
+
+  if (withinWindow && resendCount >= MAX_RESENDS_PER_HOUR) {
+    return json(429, { error: 'Rate limit exceeded. Max 5 requests per hour. Try again later.' });
+  }
+
+  const nextWindowStart = withinWindow ? new Date(windowStartMs).toISOString() : nowIso;
+  const nextResendCount = withinWindow ? resendCount + 1 : 1;
 
   const code = randomCode();
   const otpHash = await sha256(`${email}:signup:${code}`);
@@ -78,7 +97,9 @@ Deno.serve(async (req) => {
         attempt_count: 0,
         expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
         consumed_at: null,
-        last_sent_at: new Date().toISOString(),
+        last_sent_at: nowIso,
+        resend_count: nextResendCount,
+        resend_window_started_at: nextWindowStart,
       },
       { onConflict: 'email' }
     );
@@ -91,15 +112,32 @@ Deno.serve(async (req) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${serviceRoleKey}`,
+      apikey: serviceRoleKey,
     },
     body: JSON.stringify({
       email,
       otp: code,
+      purpose: 'signup',
     }),
   });
 
   if (!mailResp.ok) {
-    return json(502, { error: 'Failed to send verification code email' });
+    const downstreamText = await mailResp.text();
+    let downstreamError = 'Failed to send verification code email';
+    try {
+      const parsed = JSON.parse(downstreamText) as { error?: string; message?: string };
+      downstreamError = String(parsed.error ?? parsed.message ?? downstreamError);
+    } catch {
+      if (downstreamText.trim()) {
+        downstreamError = downstreamText;
+      }
+    }
+    console.error('send-otp failed for request-signup-otp', {
+      status: mailResp.status,
+      body: downstreamText,
+    });
+    return json(502, { error: downstreamError });
   }
 
   return json(200, { ok: true });
