@@ -21,6 +21,15 @@ import { supabase } from '../src/services/supabase';
 import { Toast } from '../src/components/Toast';
 import { useToast } from '../src/hooks/useToast';
 import {
+  AuthActionButton,
+  AuthAnimatedView,
+  AuthCard,
+  AuthFieldLabel,
+  AuthHeader,
+  AuthInputContainer,
+  AuthModeSwitch,
+} from '../src/components/auth/AuthUI';
+import {
   checkUsernameAvailability,
   isUsernameFormatValid,
   normalizeUsernameInput,
@@ -314,43 +323,42 @@ export default function ChangeUsernameScreen() {
       style={[styles.screen, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Change Username</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <AuthHeader
+        title="Change Username"
+        topInset={insets.top}
+        borderColor={colors.border}
+        textColor={colors.text}
+        onBack={() => router.back()}
+      />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing['2xl'] }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.card, { width: cardWidth, backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <AuthAnimatedView delay={40} style={{ width: cardWidth }}>
+        <AuthCard backgroundColor={colors.surface} borderColor={colors.border}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>Update your username</Text>
           <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>Current username: {currentUsername || 'Not set'}</Text>
 
-          <View style={[styles.modeSwitch, { backgroundColor: colors.inputBackground }]}> 
-            <TouchableOpacity
-              style={[styles.modeButton, mode === 'with-password' && { backgroundColor: colors.accent }]}
-              onPress={() => setMode('with-password')}
-            >
-              <Text style={[styles.modeButtonText, { color: mode === 'with-password' ? '#FFF' : colors.textSecondary }]}>Use current password</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, mode === 'forgot-password' && { backgroundColor: colors.accent }]}
-              onPress={() => setMode('forgot-password')}
-            >
-              <Text style={[styles.modeButtonText, { color: mode === 'forgot-password' ? '#FFF' : colors.textSecondary }]}>Forgot current password</Text>
-            </TouchableOpacity>
-          </View>
+          <AuthModeSwitch
+            value={mode}
+            options={[
+              { value: 'with-password', label: 'Use current password' },
+              { value: 'forgot-password', label: 'Forgot current password' },
+            ]}
+            onChange={(next) => setMode(next as Mode)}
+            accentColor={colors.accent}
+            textColor={colors.text}
+            mutedTextColor={colors.textSecondary}
+            backgroundColor={colors.inputBackground}
+          />
 
           {mode === 'with-password' ? (
             <>
               <View style={styles.fieldWrap}>
-                <Text style={[styles.fieldLabel, { color: colors.text }]}>Current password</Text>
-                <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+                <AuthFieldLabel text="Current password" color={colors.textSecondary} />
+                <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
                   <TextInput
                     value={currentPassword}
                     onChangeText={setCurrentPassword}
@@ -371,7 +379,7 @@ export default function ChangeUsernameScreen() {
                       color={colors.textSecondary}
                     />
                   </TouchableOpacity>
-                </View>
+                </AuthInputContainer>
               </View>
 
               <UsernameFields
@@ -392,31 +400,38 @@ export default function ChangeUsernameScreen() {
                 suggesting={suggesting}
               />
 
-              <TouchableOpacity
-                style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+              <AuthActionButton
+                label="Update Username"
                 onPress={changeWithCurrentPassword}
+                loading={updating}
                 disabled={updating}
-              >
-                {updating ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.primaryButtonText}>Update Username</Text>}
-              </TouchableOpacity>
+                variant="primary"
+                color={colors.accent}
+                textColor="#FFF"
+                style={styles.primaryButton}
+              />
             </>
           ) : (
             <>
-              <Text style={[styles.helpText, { color: colors.textSecondary }]}>Tap "Send Verification Code" to verify via your registered email, then update your username.</Text>
+              <Text style={[styles.helpText, { color: colors.textSecondary }]}>Use a verification code from your registered email to securely update your username.</Text>
 
-              <TouchableOpacity
-                style={[styles.secondaryButton, { borderColor: colors.accent }]}
+              <AuthActionButton
+                label="Send Verification Code"
                 onPress={sendForgotPasswordCode}
+                loading={sendingCode}
                 disabled={sendingCode}
-              >
-                {sendingCode ? <ActivityIndicator size="small" color={colors.accent} /> : <Text style={[styles.secondaryButtonText, { color: colors.accent }]}>Send Verification Code</Text>}
-              </TouchableOpacity>
+                variant="outline"
+                color={colors.accent}
+                textColor={colors.accent}
+                borderColor={colors.accent}
+                style={styles.secondaryButton}
+              />
 
               {codeSent && (
                 <>
                   <View style={styles.fieldWrap}>
-                    <Text style={[styles.fieldLabel, { color: colors.text }]}>Verification code</Text>
-                    <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+                    <AuthFieldLabel text="Verification code" color={colors.textSecondary} />
+                    <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
                       <TextInput
                         value={otpCode}
                         onChangeText={setOtpCode}
@@ -426,7 +441,7 @@ export default function ChangeUsernameScreen() {
                         keyboardType="number-pad"
                         autoCapitalize="none"
                       />
-                    </View>
+                    </AuthInputContainer>
                   </View>
 
                   <UsernameFields
@@ -447,18 +462,22 @@ export default function ChangeUsernameScreen() {
                     suggesting={suggesting}
                   />
 
-                  <TouchableOpacity
-                    style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                  <AuthActionButton
+                    label="Verify & Update Username"
                     onPress={verifyCodeAndChangeUsername}
+                    loading={updating}
                     disabled={updating}
-                  >
-                    {updating ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.primaryButtonText}>Verify & Update Username</Text>}
-                  </TouchableOpacity>
+                    variant="primary"
+                    color={colors.accent}
+                    textColor="#FFF"
+                    style={styles.primaryButton}
+                  />
                 </>
               )}
             </>
           )}
-        </View>
+        </AuthCard>
+        </AuthAnimatedView>
       </ScrollView>
 
       <Toast visible={toast.visible} message={toast.message} type={toast.type} title={toast.title} />
@@ -496,8 +515,8 @@ function UsernameFields({
   return (
     <>
       <View style={styles.fieldWrap}>
-        <Text style={[styles.fieldLabel, { color: colors.text }]}>New username</Text>
-        <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+        <AuthFieldLabel text="New username" color={colors.textSecondary} />
+        <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
           <TextInput
             value={newUsername}
             onChangeText={(v) => setNewUsername(normalizeUsernameInput(v))}
@@ -508,12 +527,12 @@ function UsernameFields({
             autoCorrect={false}
             maxLength={20}
           />
-        </View>
+        </AuthInputContainer>
       </View>
 
       <View style={styles.fieldWrap}>
-        <Text style={[styles.fieldLabel, { color: colors.text }]}>Confirm new username</Text>
-        <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+        <AuthFieldLabel text="Confirm new username" color={colors.textSecondary} />
+        <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
           <TextInput
             value={confirmUsername}
             onChangeText={(v) => setConfirmUsername(normalizeUsernameInput(v))}
@@ -524,13 +543,13 @@ function UsernameFields({
             autoCorrect={false}
             maxLength={20}
           />
-        </View>
+        </AuthInputContainer>
       </View>
 
       {availabilityState !== 'idle' && (
         <View style={styles.availabilityWrap}>
           {availabilityState === 'checking' && (
-            <Text style={[styles.availabilityText, { color: colors.textSecondary }]}>Checking username...</Text>
+            <Text style={[styles.availabilityText, { color: colors.textSecondary }]}>Checking availability...</Text>
           )}
           {availabilityState === 'available' && (
             <Text style={[styles.availabilityText, { color: '#16A34A' }]}>Username available</Text>
@@ -542,22 +561,25 @@ function UsernameFields({
             <Text style={[styles.availabilityText, { color: colors.error }]}>Username already taken</Text>
           )}
           {!!autoSuggestion && (
-            <TouchableOpacity onPress={() => onUseAutoSuggestion(autoSuggestion)}>
-              <Text style={[styles.suggestionInlineText, { color: colors.accent }]}>Try: {autoSuggestion}</Text>
+            <TouchableOpacity
+              style={[styles.inlineSuggestionBtn, { borderColor: colors.accent }]}
+              onPress={() => onUseAutoSuggestion(autoSuggestion)}
+            >
+              <Text style={[styles.suggestionInlineText, { color: colors.accent }]}>Use suggestion: {autoSuggestion}</Text>
             </TouchableOpacity>
           )}
         </View>
       )}
 
       <TouchableOpacity
-        style={[styles.suggestButton, { borderColor: colors.border }]}
+        style={[styles.suggestButton, { backgroundColor: colors.accentLight }]}
         onPress={onSuggest}
         disabled={suggesting}
       >
         {suggesting ? (
           <ActivityIndicator size="small" color={colors.accent} />
         ) : (
-          <Text style={[styles.suggestButtonText, { color: colors.accent }]}>Suggest unique username</Text>
+          <Text style={[styles.suggestButtonText, { color: colors.accent }]}>Generate username</Text>
         )}
       </TouchableOpacity>
 
@@ -580,70 +602,22 @@ function UsernameFields({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.base,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: Typography.fontSize.xl,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
   content: {
-    paddingHorizontal: Spacing.base,
-    paddingTop: Spacing.base,
+    paddingHorizontal: Spacing['2xl'],
+    paddingTop: Spacing.lg,
     alignItems: 'center',
-  },
-  card: {
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    padding: Spacing.base,
-    gap: Spacing.base,
   },
   cardTitle: {
     fontSize: Typography.fontSize.lg,
     fontWeight: '800',
   },
   cardSubtitle: {
-    fontSize: Typography.fontSize.sm,
-    marginTop: -4,
-  },
-  modeSwitch: {
-    flexDirection: 'row',
-    borderRadius: BorderRadius.lg,
-    padding: 4,
-    gap: 4,
-  },
-  modeButton: {
-    flex: 1,
-    borderRadius: BorderRadius.md,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-  },
-  modeButtonText: {
     fontSize: Typography.fontSize.xs,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontWeight: '600',
+    marginTop: -2,
   },
   fieldWrap: {
     gap: 6,
-  },
-  fieldLabel: {
-    fontSize: Typography.fontSize.sm,
-    fontWeight: '600',
-  },
-  inputWrap: {
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.base,
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   input: {
     flex: 1,
@@ -658,23 +632,31 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   suggestButton: {
-    height: 46,
+    height: 38,
     borderRadius: BorderRadius.full,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: Spacing.base,
   },
   suggestButtonText: {
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
     fontWeight: '700',
   },
   availabilityWrap: {
-    marginTop: -6,
+    marginTop: -2,
     gap: 2,
   },
   availabilityText: {
     fontSize: Typography.fontSize.xs,
     fontWeight: '600',
+  },
+  inlineSuggestionBtn: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   suggestionInlineText: {
     fontSize: Typography.fontSize.xs,
@@ -690,7 +672,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   helpText: {
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
     lineHeight: 20,
   },
   primaryButton: {
@@ -700,20 +682,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 2,
   },
-  primaryButtonText: {
-    color: '#FFF',
-    fontSize: Typography.fontSize.base,
-    fontWeight: '700',
-  },
   secondaryButton: {
     height: 48,
     borderRadius: BorderRadius.full,
-    borderWidth: 1.5,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    fontSize: Typography.fontSize.base,
-    fontWeight: '700',
   },
 });

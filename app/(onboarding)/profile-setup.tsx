@@ -23,6 +23,7 @@ import {
   BodyGender,
 } from '../../src/types';
 import { PROFILE_ICON_OPTIONS } from '../../src/constants/profileIcons';
+import { AuthAnimatedView, AuthInfoBox } from '../../src/components/auth/AuthUI';
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
@@ -497,7 +498,7 @@ export default function ProfileSetupScreen() {
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
 
         {/* ── Header ──────────────────────────────────────────────────────────── */}
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
           {currentStep > 0 ? (
             <TouchableOpacity onPress={() => setCurrentStep((s) => s - 1)} style={styles.navBtn}>
               <Ionicons name="arrow-back" size={22} color={colors.text} />
@@ -531,6 +532,15 @@ export default function ProfileSetupScreen() {
         <Text style={[styles.stepSubtitle, { color: colors.textSecondary }]}>
           {STEP_SUBTITLES[currentStep]}
         </Text>
+        <AuthInfoBox
+          iconColor={colors.accent}
+          backgroundColor={colors.accentLight}
+          borderColor={colors.accent + '40'}
+          textColor={colors.textSecondary}
+          style={styles.infoBox}
+        >
+          You can skip now and edit all profile details later from settings.
+        </AuthInfoBox>
 
         {/* ── Step content ─────────────────────────────────────────────────────── */}
         <ScrollView
@@ -538,7 +548,9 @@ export default function ProfileSetupScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {renderStep()}
+          <AuthAnimatedView key={currentStep} delay={20}>
+            {renderStep()}
+          </AuthAnimatedView>
         </ScrollView>
 
         {/* ── Footer CTA ──────────────────────────────────────────────────────── */}
@@ -572,7 +584,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Spacing.base,
     paddingBottom: Spacing.md,
-    gap: Spacing.sm,
+    gap: Spacing.md,
+    borderBottomWidth: 1,
   },
   navBtn:       { width: 36, height: 36, justifyContent: 'center' },
   skipText:     { fontSize: Typography.fontSize.sm, fontWeight: '600' },
@@ -582,13 +595,17 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.sm,
     textAlign: 'center',
     paddingHorizontal: Spacing['2xl'],
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.xs,
+  },
+  infoBox: {
+    marginHorizontal: Spacing.base,
+    marginBottom: Spacing.sm,
   },
 
   progressTrack: { height: 4, marginHorizontal: Spacing.base, borderRadius: 2, marginBottom: Spacing.md },
   progressFill:  { height: 4, borderRadius: 2 },
 
-  scrollContent: { paddingHorizontal: Spacing.base, gap: Spacing.xl },
+  scrollContent: { paddingHorizontal: Spacing.base, gap: Spacing.lg },
 
   section:      { gap: Spacing.sm },
   sectionTitle: { fontSize: Typography.fontSize.base, fontWeight: '700' },
@@ -602,7 +619,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 8,
     borderRadius: BorderRadius.full,
-    borderWidth: 1.5,
+    borderWidth: 1,
   },
   chipText: { fontWeight: '600', fontSize: Typography.fontSize.sm },
   iconGrid: {
@@ -625,7 +642,7 @@ const styles = StyleSheet.create({
   inputBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderRadius: BorderRadius.lg,
     paddingHorizontal: Spacing.md,
     height: 52,
@@ -650,7 +667,7 @@ const styles = StyleSheet.create({
   goalCard: {
     width: '47%',
     borderRadius: BorderRadius.xl,
-    borderWidth: 1.5,
+    borderWidth: 1,
     padding: Spacing.base,
     gap: 4,
     position: 'relative',
@@ -665,7 +682,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
     borderRadius: BorderRadius.lg,
-    borderWidth: 1.5,
+    borderWidth: 1,
     padding: Spacing.md,
   },
   activityEmoji: { fontSize: 22, width: 30, textAlign: 'center' },

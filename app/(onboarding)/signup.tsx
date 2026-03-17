@@ -30,6 +30,13 @@ import {
   normalizeUsernameInput,
   suggestUniqueUsername,
 } from '../../src/utils/username';
+import {
+  AuthActionButton,
+  AuthAnimatedView,
+  AuthCard,
+  AuthFieldLabel,
+  AuthInputContainer,
+} from '../../src/components/auth/AuthUI';
 
 export default function SignupScreen() {
   const { colors, isDark } = useTheme();
@@ -48,6 +55,7 @@ export default function SignupScreen() {
   const [autoSuggestion, setAutoSuggestion] = useState('');
   const availabilityRequestId = useRef(0);
   const { toast, showToast } = useToast();
+  const selectedIcon = PROFILE_ICON_OPTIONS.find((item) => item.id === avatarIcon);
 
   useEffect(() => {
     const normalized = normalizeUsernameInput(username);
@@ -182,14 +190,18 @@ export default function SignupScreen() {
           <Text style={[styles.backText, { color: colors.accent }]}>← Back</Text>
         </TouchableOpacity>
 
-        <Image source={require('../../assets/logo/logo.png')} style={styles.logo} resizeMode="contain" />
-        <Text style={[styles.title, { color: colors.text }]}>Create Account</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Join thousands of home cooks
-        </Text>
+        <AuthAnimatedView delay={20} style={styles.hero}>
+          <Image source={require('../../assets/logo/logo.png')} style={styles.logo} resizeMode="contain" />
+          <Text style={[styles.title, { color: colors.text }]}>Create Account</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            Join thousands of home cooks
+          </Text>
+        </AuthAnimatedView>
 
-        <View style={styles.form}>
-          <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground }]}>
+        <AuthAnimatedView delay={80}>
+        <AuthCard backgroundColor={colors.surface} borderColor={colors.border} style={styles.formCard}> 
+          <AuthFieldLabel text="Full name" color={colors.textSecondary} />
+          <AuthInputContainer backgroundColor={colors.inputBackground}>
             <TextInput
               style={[styles.input, { color: colors.text }]}
               placeholder="Full name"
@@ -198,8 +210,10 @@ export default function SignupScreen() {
               onChangeText={setName}
               autoCapitalize="words"
             />
-          </View>
-          <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground }]}>
+          </AuthInputContainer>
+
+          <AuthFieldLabel text="Username" color={colors.textSecondary} />
+          <AuthInputContainer backgroundColor={colors.inputBackground}>
             <TextInput
               style={[styles.input, { color: colors.text }]}
               placeholder="Username (e.g. foodie_raj)"
@@ -210,11 +224,11 @@ export default function SignupScreen() {
               autoCorrect={false}
               maxLength={20}
             />
-          </View>
+          </AuthInputContainer>
           {availabilityState !== 'idle' && (
             <View style={styles.availabilityWrap}>
               {availabilityState === 'checking' && (
-                <Text style={[styles.availabilityText, { color: colors.textSecondary }]}>Checking username...</Text>
+                <Text style={[styles.availabilityText, { color: colors.textSecondary }]}>Checking availability...</Text>
               )}
               {availabilityState === 'available' && (
                 <Text style={[styles.availabilityText, { color: '#16A34A' }]}>Username available</Text>
@@ -226,24 +240,30 @@ export default function SignupScreen() {
                 <Text style={[styles.availabilityText, { color: colors.error }]}>Username already taken</Text>
               )}
               {!!autoSuggestion && (
-                <TouchableOpacity onPress={() => setUsername(autoSuggestion)}>
-                  <Text style={[styles.suggestionInlineText, { color: colors.accent }]}>Try: {autoSuggestion}</Text>
+                <TouchableOpacity
+                  style={[styles.inlineSuggestionBtn, { borderColor: colors.accent }]}
+                  onPress={() => setUsername(autoSuggestion)}
+                >
+                  <Text style={[styles.suggestionInlineText, { color: colors.accent }]}>Use suggestion: {autoSuggestion}</Text>
                 </TouchableOpacity>
               )}
             </View>
           )}
+
           <TouchableOpacity
-            style={[styles.suggestBtn, { borderColor: colors.border }]}
+            style={[styles.quickSuggestBtn, { backgroundColor: colors.accentLight }]}
             onPress={handleSuggestUsername}
             disabled={suggestingUsername}
           >
             {suggestingUsername ? (
               <ActivityIndicator size="small" color={colors.accent} />
             ) : (
-              <Text style={[styles.suggestBtnText, { color: colors.accent }]}>Suggest unique username</Text>
+              <Text style={[styles.quickSuggestText, { color: colors.accent }]}>Generate username</Text>
             )}
           </TouchableOpacity>
-          <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground }]}>
+
+          <AuthFieldLabel text="Email" color={colors.textSecondary} />
+          <AuthInputContainer backgroundColor={colors.inputBackground}>
             <TextInput
               style={[styles.input, { color: colors.text }]}
               placeholder="Email address"
@@ -253,8 +273,10 @@ export default function SignupScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
             />
-          </View>
-          <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground }]}>
+          </AuthInputContainer>
+
+          <AuthFieldLabel text="Password" color={colors.textSecondary} />
+          <AuthInputContainer backgroundColor={colors.inputBackground}>
             <TextInput
               style={[styles.input, { color: colors.text }]}
               placeholder="Password (min 8 characters)"
@@ -263,10 +285,16 @@ export default function SignupScreen() {
               onChangeText={setPassword}
               secureTextEntry
             />
-          </View>
+          </AuthInputContainer>
 
-          <View>
-            <Text style={[styles.iconPickerTitle, { color: colors.text }]}>Choose profile icon</Text>
+          <View style={styles.iconHeaderRow}>
+            <Text style={[styles.iconPickerTitle, { color: colors.text }]}>Profile icon</Text>
+            <View style={styles.selectedBadge}>
+              <Ionicons name={selectedIcon?.icon ?? 'person-outline'} size={13} color={colors.accent} />
+              <Text style={[styles.selectedBadgeText, { color: colors.accent }]}>{selectedIcon?.label ?? 'Selected'}</Text>
+            </View>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.iconScroller}>
             <View style={styles.iconGrid}>
               {PROFILE_ICON_OPTIONS.map((option) => {
                 const active = avatarIcon === option.id;
@@ -282,26 +310,25 @@ export default function SignupScreen() {
                     ]}
                     onPress={() => setAvatarIcon(option.id)}
                   >
-                    <Ionicons name={option.icon} size={18} color={active ? colors.accent : option.color} />
-                    <Text style={[styles.iconChoiceLabel, { color: colors.textSecondary }]}>{option.label}</Text>
+                    <Ionicons name={option.icon} size={19} color={active ? colors.accent : option.color} />
                   </TouchableOpacity>
                 );
               })}
             </View>
-          </View>
+          </ScrollView>
 
-          <TouchableOpacity
-            style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
+          <AuthActionButton
+            label="Create Account"
             onPress={handleSignup}
+            loading={loading}
             disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#FFF" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Create Account</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+            variant="primary"
+            color={colors.accent}
+            textColor="#FFF"
+            style={styles.primaryBtn}
+          />
+        </AuthCard>
+        </AuthAnimatedView>
 
         <Text style={[styles.disclaimer, { color: colors.textTertiary }]}>
           By signing up, you agree to our Privacy Policy. No personal data is sold.
@@ -320,15 +347,18 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     paddingBottom: Spacing['3xl'],
   },
-  backBtn: { alignSelf: 'flex-start', marginBottom: Spacing.sm },
-  logo: { width: 80, height: 80, alignSelf: 'center', marginBottom: Spacing.sm },
+  backBtn: { alignSelf: 'flex-start' },
+  hero: {
+    gap: 6,
+    marginBottom: 2,
+  },
+  logo: { width: 64, height: 64, alignSelf: 'center', marginBottom: Spacing.xs },
   backText: { fontSize: Typography.fontSize.base, fontWeight: '600' },
   title: { fontSize: Typography.fontSize['2xl'], fontWeight: '900' },
-  subtitle: { fontSize: Typography.fontSize.base, marginBottom: Spacing.md },
-  form: { gap: Spacing.md },
-  inputContainer: {
-    borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.base,
+  subtitle: { fontSize: Typography.fontSize.base },
+  formCard: {
+    padding: Spacing.base,
+    gap: Spacing.sm,
   },
   input: {
     height: 52,
@@ -341,57 +371,71 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: Spacing.sm,
   },
-  primaryBtnText: {
-    color: '#FFF',
-    fontSize: Typography.fontSize.base,
-    fontWeight: '700',
-  },
-  suggestBtn: {
-    borderWidth: 1,
+  quickSuggestBtn: {
+    height: 38,
     borderRadius: BorderRadius.full,
-    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: Spacing.base,
   },
-  suggestBtnText: {
-    fontSize: Typography.fontSize.sm,
+  quickSuggestText: {
+    fontSize: Typography.fontSize.xs,
     fontWeight: '700',
   },
   availabilityWrap: {
-    marginTop: -6,
+    marginTop: -2,
     gap: 2,
   },
   availabilityText: {
     fontSize: Typography.fontSize.xs,
     fontWeight: '600',
   },
+  inlineSuggestionBtn: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
   suggestionInlineText: {
     fontSize: Typography.fontSize.xs,
     fontWeight: '700',
   },
+  iconHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
   iconPickerTitle: {
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
     fontWeight: '700',
-    marginBottom: Spacing.sm,
+    letterSpacing: 0.3,
+  },
+  selectedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  selectedBadgeText: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
+  },
+  iconScroller: {
+    paddingVertical: 6,
   },
   iconGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
+    gap: 10,
   },
   iconChoice: {
-    width: '22%',
-    minWidth: 64,
+    width: 44,
+    height: 44,
     borderWidth: 1,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.sm,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-  },
-  iconChoiceLabel: {
-    fontSize: 10,
-    fontWeight: '600',
   },
   disclaimer: {
     fontSize: Typography.fontSize.xs,

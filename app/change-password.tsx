@@ -8,7 +8,6 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +19,15 @@ import { useUserStore } from '../src/store/userStore';
 import { supabase } from '../src/services/supabase';
 import { Toast } from '../src/components/Toast';
 import { useToast } from '../src/hooks/useToast';
+import {
+  AuthActionButton,
+  AuthAnimatedView,
+  AuthCard,
+  AuthFieldLabel,
+  AuthHeader,
+  AuthInputContainer,
+  AuthModeSwitch,
+} from '../src/components/auth/AuthUI';
 
 type Mode = 'with-old' | 'forgot';
 
@@ -191,37 +199,36 @@ export default function ChangePasswordScreen() {
       style={[styles.screen, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Change Password</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <AuthHeader
+        title="Change Password"
+        topInset={insets.top}
+        borderColor={colors.border}
+        textColor={colors.text}
+        onBack={() => router.back()}
+      />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing['2xl'] }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.card, { width: cardWidth, backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <AuthAnimatedView delay={40} style={{ width: cardWidth }}>
+        <AuthCard backgroundColor={colors.surface} borderColor={colors.border}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>Secure your account</Text>
           <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>Email: {email || 'Not available'}</Text>
 
-          <View style={[styles.modeSwitch, { backgroundColor: colors.inputBackground }]}>
-            <TouchableOpacity
-              style={[styles.modeButton, mode === 'with-old' && { backgroundColor: colors.accent }]}
-              onPress={() => setMode('with-old')}
-            >
-              <Text style={[styles.modeButtonText, { color: mode === 'with-old' ? '#FFF' : colors.textSecondary }]}>Use current password</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, mode === 'forgot' && { backgroundColor: colors.accent }]}
-              onPress={() => setMode('forgot')}
-            >
-              <Text style={[styles.modeButtonText, { color: mode === 'forgot' ? '#FFF' : colors.textSecondary }]}>Forgot current password</Text>
-            </TouchableOpacity>
-          </View>
+          <AuthModeSwitch
+            value={mode}
+            options={[
+              { value: 'with-old', label: 'Use current password' },
+              { value: 'forgot', label: 'Forgot current password' },
+            ]}
+            onChange={(next) => setMode(next as Mode)}
+            accentColor={colors.accent}
+            textColor={colors.text}
+            mutedTextColor={colors.textSecondary}
+            backgroundColor={colors.inputBackground}
+          />
 
           {mode === 'with-old' ? (
             <>
@@ -254,25 +261,32 @@ export default function ChangePasswordScreen() {
 
               <PasswordMatchHint hasMatch={hasMatch} hasMismatch={hasMismatch} colors={colors} />
 
-              <TouchableOpacity
-                style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+              <AuthActionButton
+                label="Update Password"
                 onPress={updateWithOldPassword}
+                loading={updating}
                 disabled={updating}
-              >
-                {updating ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.primaryButtonText}>Update Password</Text>}
-              </TouchableOpacity>
+                variant="primary"
+                color={colors.accent}
+                textColor="#FFF"
+                style={styles.primaryButton}
+              />
             </>
           ) : (
             <>
               <Text style={[styles.helpText, { color: colors.textSecondary }]}>Tap "Send Verification Code" to receive a code on your registered email, then enter it below to reset your password.</Text>
 
-              <TouchableOpacity
-                style={[styles.secondaryButton, { borderColor: colors.accent }]}
+              <AuthActionButton
+                label="Send Verification Code"
                 onPress={sendForgotCode}
+                loading={sendingCode}
                 disabled={sendingCode}
-              >
-                {sendingCode ? <ActivityIndicator size="small" color={colors.accent} /> : <Text style={[styles.secondaryButtonText, { color: colors.accent }]}>Send Verification Code</Text>}
-              </TouchableOpacity>
+                variant="outline"
+                color={colors.accent}
+                textColor={colors.accent}
+                borderColor={colors.accent}
+                style={styles.secondaryButton}
+              />
 
               {codeSent && (
                 <>
@@ -305,18 +319,22 @@ export default function ChangePasswordScreen() {
 
                   <PasswordMatchHint hasMatch={hasMatch} hasMismatch={hasMismatch} colors={colors} />
 
-                  <TouchableOpacity
-                    style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                  <AuthActionButton
+                    label="Verify & Update Password"
                     onPress={verifyCodeAndUpdatePassword}
+                    loading={updating}
                     disabled={updating}
-                  >
-                    {updating ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.primaryButtonText}>Verify & Update Password</Text>}
-                  </TouchableOpacity>
+                    variant="primary"
+                    color={colors.accent}
+                    textColor="#FFF"
+                    style={styles.primaryButton}
+                  />
                 </>
               )}
             </>
           )}
-        </View>
+        </AuthCard>
+        </AuthAnimatedView>
       </ScrollView>
 
       <Toast visible={toast.visible} message={toast.message} type={toast.type} title={toast.title} />
@@ -349,8 +367,8 @@ function Field({
 
   return (
     <View style={styles.fieldWrap}>
-      <Text style={[styles.fieldLabel, { color: colors.text }]}>{label}</Text>
-      <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+      <AuthFieldLabel text={label} color={colors.textSecondary} />
+      <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -374,7 +392,7 @@ function Field({
             />
           </TouchableOpacity>
         ) : null}
-      </View>
+      </AuthInputContainer>
     </View>
   );
 }
@@ -401,70 +419,22 @@ function PasswordMatchHint({ hasMatch, hasMismatch, colors }: { hasMatch: boolea
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.base,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: Typography.fontSize.xl,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
   content: {
-    paddingHorizontal: Spacing.base,
-    paddingTop: Spacing.base,
+    paddingHorizontal: Spacing['2xl'],
+    paddingTop: Spacing.lg,
     alignItems: 'center',
-  },
-  card: {
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    padding: Spacing.base,
-    gap: Spacing.base,
   },
   cardTitle: {
     fontSize: Typography.fontSize.lg,
     fontWeight: '800',
   },
   cardSubtitle: {
-    fontSize: Typography.fontSize.sm,
-    marginTop: -4,
-  },
-  modeSwitch: {
-    flexDirection: 'row',
-    borderRadius: BorderRadius.lg,
-    padding: 4,
-    gap: 4,
-  },
-  modeButton: {
-    flex: 1,
-    borderRadius: BorderRadius.md,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-  },
-  modeButtonText: {
     fontSize: Typography.fontSize.xs,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontWeight: '600',
+    marginTop: -2,
   },
   fieldWrap: {
     gap: 6,
-  },
-  fieldLabel: {
-    fontSize: Typography.fontSize.sm,
-    fontWeight: '600',
-  },
-  inputWrap: {
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.base,
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   input: {
     flex: 1,
@@ -484,11 +454,11 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   hintText: {
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
     fontWeight: '600',
   },
   helpText: {
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
     lineHeight: 20,
   },
   primaryButton: {
@@ -498,20 +468,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 2,
   },
-  primaryButtonText: {
-    color: '#FFF',
-    fontSize: Typography.fontSize.base,
-    fontWeight: '700',
-  },
   secondaryButton: {
     height: 48,
     borderRadius: BorderRadius.full,
-    borderWidth: 1.5,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    fontSize: Typography.fontSize.base,
-    fontWeight: '700',
   },
 });

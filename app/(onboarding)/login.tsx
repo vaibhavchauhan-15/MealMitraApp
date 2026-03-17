@@ -22,6 +22,13 @@ import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { useUserStore } from '../../src/store/userStore';
 import { supabase } from '../../src/services/supabase';
 import { shouldForceProfileSetup } from '../../src/utils/profileCompletion';
+import {
+  AuthActionButton,
+  AuthAnimatedView,
+  AuthCard,
+  AuthFieldLabel,
+  AuthInputContainer,
+} from '../../src/components/auth/AuthUI';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as Linking from 'expo-linking';
@@ -217,14 +224,16 @@ export default function LoginScreen() {
         contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing['2xl'] }]}
         keyboardShouldPersistTaps="handled"
       >
-        <Image source={require('../../assets/logo/logo.png')} style={styles.logo} resizeMode="contain" />
-        <Text style={[styles.title, { color: colors.text }]}>Welcome Back!</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Sign in to continue cooking
-        </Text>
+        <AuthAnimatedView delay={20} style={styles.hero}>
+          <Image source={require('../../assets/logo/logo.png')} style={styles.logo} resizeMode="contain" />
+          <Text style={[styles.title, { color: colors.text }]}>Welcome Back</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Sign in to continue cooking</Text>
+        </AuthAnimatedView>
 
-        <View style={styles.form}>
-          <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground }]}>
+        <AuthAnimatedView delay={70}>
+        <AuthCard backgroundColor={colors.surface} borderColor={colors.border} style={styles.formCard}>
+          <AuthFieldLabel text="Username or email" color={colors.textSecondary} />
+          <AuthInputContainer backgroundColor={colors.inputBackground}>
             <TextInput
               style={[styles.input, { color: colors.text }]}
               placeholder="Username or email"
@@ -233,8 +242,10 @@ export default function LoginScreen() {
               onChangeText={setIdentifier}
               autoCapitalize="none"
             />
-          </View>
-          <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground }]}>
+          </AuthInputContainer>
+
+          <AuthFieldLabel text="Password" color={colors.textSecondary} />
+          <AuthInputContainer backgroundColor={colors.inputBackground}>
             <TextInput
               style={[styles.input, { color: colors.text }]}
               placeholder="Password"
@@ -243,19 +254,18 @@ export default function LoginScreen() {
               onChangeText={setPassword}
               secureTextEntry
             />
-          </View>
+          </AuthInputContainer>
 
-          <TouchableOpacity
-            style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
+          <AuthActionButton
+            label="Sign In"
             onPress={handleLogin}
+            loading={loading}
             disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#FFF" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Sign In</Text>
-            )}
-          </TouchableOpacity>
+            variant="primary"
+            color={colors.accent}
+            textColor="#FFF"
+            style={styles.primaryBtn}
+          />
 
           <View style={styles.dividerRow}>
             <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -280,13 +290,17 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.secondaryBtn, { borderColor: colors.border }]}
+          <AuthActionButton
+            label="Continue as Guest"
             onPress={handleGuest}
-          >
-            <Text style={[styles.secondaryBtnText, { color: colors.text }]}>Continue as Guest</Text>
-          </TouchableOpacity>
-        </View>
+            variant="outline"
+            color={colors.text}
+            textColor={colors.text}
+            borderColor={colors.border}
+            style={styles.secondaryBtn}
+          />
+        </AuthCard>
+        </AuthAnimatedView>
 
         <View style={styles.signupRow}>
           <Text style={[styles.signupText, { color: colors.textSecondary }]}>
@@ -307,33 +321,30 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: {
     paddingHorizontal: Spacing['2xl'],
-    alignItems: 'center',
     gap: Spacing.md,
     paddingBottom: Spacing['3xl'],
   },
-  logo: { width: 90, height: 90, marginBottom: Spacing.sm, alignSelf: 'center' },
+  hero: {
+    gap: 6,
+    marginBottom: 2,
+  },
+  logo: { width: 64, height: 64, marginBottom: Spacing.xs, alignSelf: 'center' },
   title: { fontSize: Typography.fontSize['2xl'], fontWeight: '900' },
-  subtitle: { fontSize: Typography.fontSize.base, marginBottom: Spacing.md },
-  form: { width: '100%', gap: Spacing.md },
-  inputContainer: {
-    borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.base,
+  subtitle: { fontSize: Typography.fontSize.base },
+  formCard: {
+    padding: Spacing.base,
+    gap: Spacing.sm,
   },
   input: {
     height: 52,
     fontSize: Typography.fontSize.base,
   },
   primaryBtn: {
-    height: 52,
+    height: 50,
     borderRadius: BorderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: Spacing.sm,
-  },
-  primaryBtnText: {
-    color: '#FFF',
-    fontSize: Typography.fontSize.base,
-    fontWeight: '700',
+    marginTop: Spacing.xs,
   },
   dividerRow: {
     flexDirection: 'row',
@@ -343,22 +354,18 @@ const styles = StyleSheet.create({
   divider: { flex: 1, height: 1 },
   dividerText: { fontSize: Typography.fontSize.sm },
   secondaryBtn: {
-    height: 52,
+    height: 50,
     borderRadius: BorderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-  },
-  secondaryBtnText: {
-    fontSize: Typography.fontSize.base,
-    fontWeight: '600',
+    borderWidth: 1,
   },
   googleBtn: {
-    height: 52,
+    height: 50,
     borderRadius: BorderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
+    borderWidth: 1,
     flexDirection: 'row',
     gap: Spacing.sm,
   },
@@ -373,7 +380,7 @@ const styles = StyleSheet.create({
   },
   signupRow: {
     flexDirection: 'row',
-    marginTop: Spacing.md,
+    marginTop: Spacing.sm,
   },
   signupText: { fontSize: Typography.fontSize.base },
   signupLink: { fontSize: Typography.fontSize.base, fontWeight: '700' },

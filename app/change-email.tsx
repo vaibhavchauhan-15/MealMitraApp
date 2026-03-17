@@ -20,6 +20,16 @@ import { useUserStore } from '../src/store/userStore';
 import { supabase } from '../src/services/supabase';
 import { Toast } from '../src/components/Toast';
 import { useToast } from '../src/hooks/useToast';
+import {
+  AuthActionButton,
+  AuthAnimatedView,
+  AuthCard,
+  AuthFieldLabel,
+  AuthHeader,
+  AuthInfoBox,
+  AuthInputContainer,
+  AuthModeSwitch,
+} from '../src/components/auth/AuthUI';
 
 type Mode = 'with-password' | 'forgot-password';
 
@@ -206,51 +216,52 @@ export default function ChangeEmailScreen() {
       style={[styles.screen, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Change Email</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <AuthHeader
+        title="Change Email"
+        topInset={insets.top}
+        borderColor={colors.border}
+        textColor={colors.text}
+        onBack={() => router.back()}
+      />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing['2xl'] }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.card, { width: cardWidth, backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <AuthAnimatedView delay={40} style={{ width: cardWidth }}>
+        <AuthCard backgroundColor={colors.surface} borderColor={colors.border}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>Update your account email</Text>
           <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>Current email: {currentEmail || 'Not available'}</Text>
 
-          <View style={[styles.infoBox, { backgroundColor: colors.accentLight, borderColor: colors.accent + '40' }]}> 
-            <Ionicons name="information-circle-outline" size={16} color={colors.accent} />
-            <Text style={[styles.infoText, { color: colors.textSecondary }]}>
+          <AuthInfoBox
+            iconColor={colors.accent}
+            backgroundColor={colors.accentLight}
+            borderColor={colors.accent + '40'}
+            textColor={colors.textSecondary}
+          >
               Pending verification: Supabase may require email confirmation from your inbox.
               Your new email is fully active only after you confirm that email link/code.
-            </Text>
-          </View>
+          </AuthInfoBox>
 
-          <View style={[styles.modeSwitch, { backgroundColor: colors.inputBackground }]}> 
-            <TouchableOpacity
-              style={[styles.modeButton, mode === 'with-password' && { backgroundColor: colors.accent }]}
-              onPress={() => setMode('with-password')}
-            >
-              <Text style={[styles.modeButtonText, { color: mode === 'with-password' ? '#FFF' : colors.textSecondary }]}>Use current password</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, mode === 'forgot-password' && { backgroundColor: colors.accent }]}
-              onPress={() => setMode('forgot-password')}
-            >
-              <Text style={[styles.modeButtonText, { color: mode === 'forgot-password' ? '#FFF' : colors.textSecondary }]}>Forgot current password</Text>
-            </TouchableOpacity>
-          </View>
+          <AuthModeSwitch
+            value={mode}
+            options={[
+              { value: 'with-password', label: 'Use current password' },
+              { value: 'forgot-password', label: 'Forgot current password' },
+            ]}
+            onChange={(next) => setMode(next as Mode)}
+            accentColor={colors.accent}
+            textColor={colors.text}
+            mutedTextColor={colors.textSecondary}
+            backgroundColor={colors.inputBackground}
+          />
 
           {mode === 'with-password' ? (
             <>
               <View style={styles.fieldWrap}>
-                <Text style={[styles.fieldLabel, { color: colors.text }]}>Current password</Text>
-                <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+                <AuthFieldLabel text="Current password" color={colors.textSecondary} />
+                <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
                   <TextInput
                     value={currentPassword}
                     onChangeText={setCurrentPassword}
@@ -271,7 +282,7 @@ export default function ChangeEmailScreen() {
                       color={colors.textSecondary}
                     />
                   </TouchableOpacity>
-                </View>
+                </AuthInputContainer>
               </View>
 
               <EmailFields
@@ -284,31 +295,38 @@ export default function ChangeEmailScreen() {
                 emailsMismatch={emailsMismatch}
               />
 
-              <TouchableOpacity
-                style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+              <AuthActionButton
+                label="Update Email"
                 onPress={changeWithCurrentPassword}
+                loading={updating}
                 disabled={updating}
-              >
-                {updating ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.primaryButtonText}>Update Email</Text>}
-              </TouchableOpacity>
+                variant="primary"
+                color={colors.accent}
+                textColor="#FFF"
+                style={styles.primaryButton}
+              />
             </>
           ) : (
             <>
-              <Text style={[styles.helpText, { color: colors.textSecondary }]}>Tap "Send Verification Code" to verify your identity via your current registered email, then update your email address.</Text>
+              <Text style={[styles.helpText, { color: colors.textSecondary }]}>Use a verification code from your current email to securely update your email address.</Text>
 
-              <TouchableOpacity
-                style={[styles.secondaryButton, { borderColor: colors.accent }]}
+              <AuthActionButton
+                label="Send Verification Code"
                 onPress={sendForgotPasswordCode}
+                loading={sendingCode}
                 disabled={sendingCode}
-              >
-                {sendingCode ? <ActivityIndicator size="small" color={colors.accent} /> : <Text style={[styles.secondaryButtonText, { color: colors.accent }]}>Send Verification Code</Text>}
-              </TouchableOpacity>
+                variant="outline"
+                color={colors.accent}
+                textColor={colors.accent}
+                borderColor={colors.accent}
+                style={styles.secondaryButton}
+              />
 
               {codeSent && (
                 <>
                   <View style={styles.fieldWrap}>
-                    <Text style={[styles.fieldLabel, { color: colors.text }]}>Verification code</Text>
-                    <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+                    <AuthFieldLabel text="Verification code" color={colors.textSecondary} />
+                    <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
                       <TextInput
                         value={otpCode}
                         onChangeText={setOtpCode}
@@ -318,7 +336,7 @@ export default function ChangeEmailScreen() {
                         keyboardType="number-pad"
                         autoCapitalize="none"
                       />
-                    </View>
+                    </AuthInputContainer>
                   </View>
 
                   <EmailFields
@@ -331,18 +349,22 @@ export default function ChangeEmailScreen() {
                     emailsMismatch={emailsMismatch}
                   />
 
-                  <TouchableOpacity
-                    style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                  <AuthActionButton
+                    label="Verify & Update Email"
                     onPress={verifyCodeAndChangeEmail}
+                    loading={updating}
                     disabled={updating}
-                  >
-                    {updating ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.primaryButtonText}>Verify & Update Email</Text>}
-                  </TouchableOpacity>
+                    variant="primary"
+                    color={colors.accent}
+                    textColor="#FFF"
+                    style={styles.primaryButton}
+                  />
                 </>
               )}
             </>
           )}
-        </View>
+        </AuthCard>
+        </AuthAnimatedView>
       </ScrollView>
 
       <Toast visible={toast.visible} message={toast.message} type={toast.type} title={toast.title} />
@@ -370,8 +392,8 @@ function EmailFields({
   return (
     <>
       <View style={styles.fieldWrap}>
-        <Text style={[styles.fieldLabel, { color: colors.text }]}>New email</Text>
-        <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+        <AuthFieldLabel text="New email" color={colors.textSecondary} />
+        <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
           <TextInput
             value={newEmail}
             onChangeText={setNewEmail}
@@ -381,12 +403,12 @@ function EmailFields({
             keyboardType="email-address"
             autoCapitalize="none"
           />
-        </View>
+        </AuthInputContainer>
       </View>
 
       <View style={styles.fieldWrap}>
-        <Text style={[styles.fieldLabel, { color: colors.text }]}>Confirm new email</Text>
-        <View style={[styles.inputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+        <AuthFieldLabel text="Confirm new email" color={colors.textSecondary} />
+        <AuthInputContainer backgroundColor={colors.inputBackground} borderColor={colors.border}>
           <TextInput
             value={confirmEmail}
             onChangeText={setConfirmEmail}
@@ -396,7 +418,7 @@ function EmailFields({
             keyboardType="email-address"
             autoCapitalize="none"
           />
-        </View>
+        </AuthInputContainer>
       </View>
 
       {emailsMatch ? (
@@ -418,84 +440,22 @@ function EmailFields({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.base,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: Typography.fontSize.xl,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
   content: {
-    paddingHorizontal: Spacing.base,
-    paddingTop: Spacing.base,
+    paddingHorizontal: Spacing['2xl'],
+    paddingTop: Spacing.lg,
     alignItems: 'center',
-  },
-  card: {
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    padding: Spacing.base,
-    gap: Spacing.base,
   },
   cardTitle: {
     fontSize: Typography.fontSize.lg,
     fontWeight: '800',
   },
   cardSubtitle: {
-    fontSize: Typography.fontSize.sm,
-    marginTop: -4,
-  },
-  infoBox: {
-    borderWidth: 1,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginTop: 2,
-  },
-  infoText: {
-    flex: 1,
     fontSize: Typography.fontSize.xs,
-    lineHeight: 18,
-  },
-  modeSwitch: {
-    flexDirection: 'row',
-    borderRadius: BorderRadius.lg,
-    padding: 4,
-    gap: 4,
-  },
-  modeButton: {
-    flex: 1,
-    borderRadius: BorderRadius.md,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-  },
-  modeButtonText: {
-    fontSize: Typography.fontSize.xs,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontWeight: '600',
+    marginTop: -2,
   },
   fieldWrap: {
     gap: 6,
-  },
-  fieldLabel: {
-    fontSize: Typography.fontSize.sm,
-    fontWeight: '600',
-  },
-  inputWrap: {
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.base,
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   input: {
     flex: 1,
@@ -515,11 +475,11 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   hintText: {
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
     fontWeight: '600',
   },
   helpText: {
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
     lineHeight: 20,
   },
   primaryButton: {
@@ -529,20 +489,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 2,
   },
-  primaryButtonText: {
-    color: '#FFF',
-    fontSize: Typography.fontSize.base,
-    fontWeight: '700',
-  },
   secondaryButton: {
     height: 48,
     borderRadius: BorderRadius.full,
-    borderWidth: 1.5,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    fontSize: Typography.fontSize.base,
-    fontWeight: '700',
   },
 });

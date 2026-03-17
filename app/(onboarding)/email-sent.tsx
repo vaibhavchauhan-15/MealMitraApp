@@ -5,12 +5,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
-  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/theme/useTheme';
-import { Spacing, Typography, BorderRadius } from '../../src/theme';
+import { Spacing, Typography } from '../../src/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../src/services/supabase';
 import { useUserStore } from '../../src/store/userStore';
@@ -18,6 +17,12 @@ import * as Linking from 'expo-linking';
 import { Toast } from '../../src/components/Toast';
 import { useToast } from '../../src/hooks/useToast';
 import { shouldForceProfileSetup } from '../../src/utils/profileCompletion';
+import {
+  AuthActionButton,
+  AuthAnimatedView,
+  AuthHeader,
+  AuthInfoBox,
+} from '../../src/components/auth/AuthUI';
 
 export default function EmailSentScreen() {
   const { colors, isDark } = useTheme();
@@ -68,15 +73,19 @@ export default function EmailSentScreen() {
   };
 
   return (
-    <View
-      style={[
-        styles.screen,
-        { backgroundColor: colors.background, paddingTop: insets.top },
-      ]}
-    >
+    <View style={[styles.screen, { backgroundColor: colors.background }]}> 
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
+      <AuthHeader
+        title="Verify Email"
+        topInset={insets.top}
+        borderColor={colors.border}
+        textColor={colors.text}
+        onBack={() => router.back()}
+      />
+
       <View style={styles.content}>
+        <AuthAnimatedView delay={20} style={styles.stackBlock}>
         <View style={[styles.iconCircle, { backgroundColor: colors.accent + '20' }]}>
           <Ionicons name="mail-outline" size={56} color={colors.accent} />
         </View>
@@ -89,27 +98,33 @@ export default function EmailSentScreen() {
         {email ? (
           <Text style={[styles.emailText, { color: colors.accent }]}>{email}</Text>
         ) : null}
+        </AuthAnimatedView>
 
-        <View style={[styles.infoBox, { backgroundColor: colors.surface }]}>
-          <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
-          <Text style={[styles.infoText, { color: colors.textSecondary }]}>
+        <AuthAnimatedView delay={70} style={styles.stackBlock}>
+        <AuthInfoBox
+          iconColor={colors.accent}
+          backgroundColor={colors.accentLight}
+          borderColor={colors.accent + '40'}
+          textColor={colors.textSecondary}
+        >
             Tap the confirmation link in the email. You'll be{' '}
             <Text style={{ fontWeight: '700' }}>automatically logged in</Text> — no need to sign in
             again.
-          </Text>
-        </View>
+        </AuthInfoBox>
+        </AuthAnimatedView>
 
-        <TouchableOpacity
-          style={[styles.resendBtn, { borderColor: colors.accent }]}
+        <AuthAnimatedView delay={110} style={styles.stackBlock}>
+        <AuthActionButton
+          label="Resend Email"
           onPress={handleResend}
+          loading={resending}
           disabled={resending}
-        >
-          {resending ? (
-            <ActivityIndicator size="small" color={colors.accent} />
-          ) : (
-            <Text style={[styles.resendText, { color: colors.accent }]}>Resend Email</Text>
-          )}
-        </TouchableOpacity>
+          variant="outline"
+          color={colors.accent}
+          textColor={colors.accent}
+          borderColor={colors.accent}
+          style={styles.resendBtn}
+        />
 
         <TouchableOpacity onPress={() => router.replace('/(onboarding)/login' as any)}>
           <Text style={[styles.loginLink, { color: colors.textSecondary }]}>
@@ -117,6 +132,7 @@ export default function EmailSentScreen() {
             <Text style={{ color: colors.accent, fontWeight: '600' }}>Sign In</Text>
           </Text>
         </TouchableOpacity>
+        </AuthAnimatedView>
       </View>
 
       <Toast
@@ -133,10 +149,15 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: 'stretch',
     justifyContent: 'center',
     paddingHorizontal: Spacing['2xl'],
-    gap: Spacing.md,
+    paddingBottom: Spacing['2xl'],
+    gap: Spacing.sm,
+  },
+  stackBlock: {
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
   iconCircle: {
     width: 110,
@@ -144,7 +165,7 @@ const styles = StyleSheet.create({
     borderRadius: 55,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   title: {
     fontSize: Typography.fontSize['2xl'],
@@ -161,34 +182,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: Spacing.sm,
   },
-  infoBox: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    padding: Spacing.base,
-    borderRadius: BorderRadius.lg,
-    marginVertical: Spacing.md,
-    alignItems: 'flex-start',
-  },
-  infoText: {
-    flex: 1,
-    fontSize: Typography.fontSize.sm,
-    lineHeight: 20,
-  },
   resendBtn: {
-    height: 50,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1.5,
     paddingHorizontal: Spacing['2xl'],
-    alignItems: 'center',
-    justifyContent: 'center',
     marginTop: Spacing.sm,
-  },
-  resendText: {
-    fontSize: Typography.fontSize.base,
-    fontWeight: '600',
   },
   loginLink: {
     fontSize: Typography.fontSize.sm,
-    marginTop: Spacing.base,
+    marginTop: Spacing.sm,
   },
 });
