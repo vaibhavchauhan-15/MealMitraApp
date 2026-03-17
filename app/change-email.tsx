@@ -20,6 +20,7 @@ import { useUserStore } from '../src/store/userStore';
 import { supabase } from '../src/services/supabase';
 import { Toast } from '../src/components/Toast';
 import { useToast } from '../src/hooks/useToast';
+import { isValidOtpCode, sendEmailOtpCode, verifyEmailOtpCode } from '../src/services/emailOtpService';
 import {
   AuthActionButton,
   AuthAnimatedView,
@@ -157,12 +158,7 @@ export default function ChangeEmailScreen() {
     }
 
     setSendingCode(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email: currentEmail,
-      options: {
-        shouldCreateUser: false,
-      },
-    });
+    const { error } = await sendEmailOtpCode(currentEmail);
     setSendingCode(false);
 
     if (error) {
@@ -171,7 +167,7 @@ export default function ChangeEmailScreen() {
     }
 
     setCodeSent(true);
-    showToast('Verification code sent to your current email.', 'success', 'Code Sent');
+    showToast('Verification code sent. Enter the 6-digit code from your email.', 'success', 'Code Sent');
   };
 
   const verifyCodeAndChangeEmail = async () => {
@@ -180,15 +176,15 @@ export default function ChangeEmailScreen() {
       showToast('Please enter the verification code.', 'error', 'Validation');
       return;
     }
+    if (!isValidOtpCode(otpCode)) {
+      showToast('Enter a valid 6-digit verification code.', 'error', 'Validation');
+      return;
+    }
 
     const targetEmail = newEmail.trim().toLowerCase();
 
     setUpdating(true);
-    const { error: verifyOtpErr } = await supabase.auth.verifyOtp({
-      email: currentEmail,
-      token: otpCode.trim(),
-      type: 'email',
-    });
+    const { error: verifyOtpErr } = await verifyEmailOtpCode(currentEmail, otpCode);
 
     if (verifyOtpErr) {
       setUpdating(false);

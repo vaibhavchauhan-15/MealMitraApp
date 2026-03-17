@@ -35,6 +35,7 @@ import {
   normalizeUsernameInput,
   suggestUniqueUsername,
 } from '../src/utils/username';
+import { isValidOtpCode, sendEmailOtpCode, verifyEmailOtpCode } from '../src/services/emailOtpService';
 
 type Mode = 'with-password' | 'forgot-password';
 
@@ -262,12 +263,7 @@ export default function ChangeUsernameScreen() {
     }
 
     setSendingCode(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: false,
-      },
-    });
+    const { error } = await sendEmailOtpCode(email);
     setSendingCode(false);
 
     if (error) {
@@ -276,7 +272,7 @@ export default function ChangeUsernameScreen() {
     }
 
     setCodeSent(true);
-    showToast('Verification code sent to your registered email.', 'success', 'Code Sent');
+    showToast('Verification code sent. Enter the 6-digit code from your email.', 'success', 'Code Sent');
   };
 
   const verifyCodeAndChangeUsername = async () => {
@@ -285,17 +281,17 @@ export default function ChangeUsernameScreen() {
       showToast('Please enter the verification code.', 'error', 'Validation');
       return;
     }
+    if (!isValidOtpCode(otpCode)) {
+      showToast('Enter a valid 6-digit verification code.', 'error', 'Validation');
+      return;
+    }
     if (!email) {
       showToast('No registered email found for this account.', 'error', 'Email Missing');
       return;
     }
 
     setUpdating(true);
-    const { error: verifyOtpErr } = await supabase.auth.verifyOtp({
-      email,
-      token: otpCode.trim(),
-      type: 'email',
-    });
+    const { error: verifyOtpErr } = await verifyEmailOtpCode(email, otpCode);
 
     if (verifyOtpErr) {
       setUpdating(false);
