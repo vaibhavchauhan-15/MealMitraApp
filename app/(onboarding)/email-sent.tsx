@@ -17,6 +17,7 @@ import { useUserStore } from '../../src/store/userStore';
 import * as Linking from 'expo-linking';
 import { Toast } from '../../src/components/Toast';
 import { useToast } from '../../src/hooks/useToast';
+import { shouldForceProfileSetup } from '../../src/utils/profileCompletion';
 
 export default function EmailSentScreen() {
   const { colors, isDark } = useTheme();
@@ -25,7 +26,7 @@ export default function EmailSentScreen() {
   const { email } = useLocalSearchParams<{ email: string }>();
   const { toast, showToast } = useToast();
   const [resending, setResending] = useState(false);
-  const { setProfile, setHasOnboarded } = useUserStore();
+  const { hydrateFromAuthUser } = useUserStore();
 
   useEffect(() => {
     // Listen for session — fires when deep link sets the session after email confirmation
@@ -37,16 +38,14 @@ export default function EmailSentScreen() {
         session?.user
       ) {
         const user = session.user;
-        setProfile({
-          id: user.id,
-          name: user.user_metadata?.name ?? user.email?.split('@')[0] ?? 'User',
-          email: user.email ?? '',
-          avatar: user.user_metadata?.avatar_url ?? undefined,
-          favoriteCuisines: [],
-          cookingLevel: 'Beginner',
+        hydrateFromAuthUser(user).then(() => {
+          const hydratedProfile = useUserStore.getState().profile;
+          if (shouldForceProfileSetup(hydratedProfile)) {
+            router.replace('/(onboarding)/profile-setup' as any);
+            return;
+          }
+          router.replace('/(tabs)' as any);
         });
-        setHasOnboarded(true);
-        router.replace('/(tabs)' as any);
       }
     });
     return () => subscription.unsubscribe();

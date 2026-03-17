@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   Pressable,
   Platform,
-  Image,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/useTheme';
@@ -30,11 +30,11 @@ import {
 import {
   saveAiDietPlan,
   deleteAiDietPlan,
-  findExactPublicDietPlans,
   uploadAiDietPlan,
   upsertAiDietPlanMeals,
   AiDietPlanMealSelection,
   SavedAiDietPlanMeal,
+  findMasterRecipeMatchesForMealsBatch,
 } from '../services/aiPlanSupabaseService';
 import { useRouter } from 'expo-router';
 import { usePlannerStore } from '../store/plannerStore';
@@ -42,8 +42,6 @@ import { useRecipeStore } from '../store/recipeStore';
 import { useUserStore } from '../store/userStore';
 import { DayOfWeek, MealType, Recipe, UserHealthProfile } from '../types';
 import * as Crypto from 'expo-crypto';
-
-const RECIPE_PLACEHOLDER = require('../../assets/icons/Recipe-icon-paceholder.jpg');
 
 // diet preference string → DietType mapping
 const DIET_PREF_TO_TYPE: Record<string, DietType> = {
@@ -156,26 +154,28 @@ function DaySelector({
   onToggle,
   onToggleAll,
   colors,
+  compact,
 }: {
   selected: DayOfWeek[];
   onToggle: (d: DayOfWeek) => void;
   onToggleAll: () => void;
   colors: any;
+  compact?: boolean;
 }) {
   const allSelected = selected.length === ALL_DAYS.length;
   return (
-    <View style={ds.container}>
-      <Text style={[ds.label, { color: colors.text }]}>Add to Planner — Select Day(s)</Text>
-      <View style={ds.row}>
+    <View style={[ds.container, compact && ds.containerCompact]}>
+      <Text style={[ds.label, compact && ds.labelCompact, { color: colors.text }]}>Add to Planner — Select Day(s)</Text>
+      <View style={[ds.row, compact && ds.rowCompact]}>
         <TouchableOpacity
           onPress={onToggleAll}
-          style={[ds.chip, {
+          style={[ds.chip, compact && ds.chipCompact, {
             backgroundColor: allSelected ? colors.accent : colors.surface,
             borderColor: allSelected ? colors.accent : colors.border,
           }]}
           activeOpacity={0.75}
         >
-          <Text style={[ds.chipText, { color: allSelected ? '#FFF' : colors.textSecondary }]}>All</Text>
+          <Text style={[ds.chipText, compact && ds.chipTextCompact, { color: allSelected ? '#FFF' : colors.textSecondary }]}>All</Text>
         </TouchableOpacity>
         {ALL_DAYS.map((day) => {
           const active = selected.includes(day);
@@ -183,76 +183,24 @@ function DaySelector({
             <TouchableOpacity
               key={day}
               onPress={() => onToggle(day)}
-              style={[ds.chip, {
+              style={[ds.chip, compact && ds.chipCompact, {
                 backgroundColor: active ? colors.accent : colors.surface,
                 borderColor: active ? colors.accent : colors.border,
               }]}
               activeOpacity={0.75}
             >
-              <Text style={[ds.chipText, { color: active ? '#FFF' : colors.textSecondary }]}>{day}</Text>
+              <Text style={[ds.chipText, compact && ds.chipTextCompact, { color: active ? '#FFF' : colors.textSecondary }]}>{day}</Text>
             </TouchableOpacity>
           );
         })}
       </View>
       {selected.length > 0 && (
-        <Text style={[ds.hint, { color: colors.textTertiary }]}>
+        <Text style={[ds.hint, compact && ds.hintCompact, { color: colors.textTertiary }]}>
           {selected.length === 7
             ? 'Full week plan selected'
             : `${selected.length} day${selected.length > 1 ? 's' : ''} selected: ${selected.join(', ')}`}
         </Text>
       )}
-    </View>
-  );
-}
-
-// ─── Shared option list helper ────────────────────────────────────────────────
-
-interface Option<T extends string> {
-  value: T;
-  label: string;
-  icon: string;
-}
-
-function OptionGroup<T extends string>({
-  options,
-  value,
-  onSelect,
-  colors,
-}: {
-  options: Option<T>[];
-  value: T | null;
-  onSelect: (v: T) => void;
-  colors: any;
-}) {
-  return (
-    <View style={og.row}>
-      {options.map((opt) => {
-        const active = value === opt.value;
-        return (
-          <TouchableOpacity
-            key={opt.value}
-            onPress={() => onSelect(opt.value)}
-            style={[
-              og.chip,
-              {
-                backgroundColor: active ? colors.accent : colors.surface,
-                borderColor: active ? colors.accent : colors.border,
-              },
-            ]}
-            activeOpacity={0.75}
-          >
-            <Text style={og.chipIcon}>{opt.icon}</Text>
-            <Text
-              style={[
-                og.chipLabel,
-                { color: active ? '#FFF' : colors.textSecondary },
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
     </View>
   );
 }
@@ -265,30 +213,41 @@ const MealSection = memo(function MealSection({
   items,
   colors,
   accentColor,
+  compact,
 }: {
   title: string;
   emoji: string;
   items: MealItem[];
   colors: any;
   accentColor?: string;
+  compact?: boolean;
 }) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [detailTab, setDetailTab] = useState<'ingredients' | 'steps'>('ingredients');
   const color = accentColor ?? colors.accent;
   const totalCal = items.reduce((s, i) => s + (i.calories ?? 0), 0);
   const totalProt = items.reduce((s, i) => s + (i.protein_g ?? 0), 0);
 
-  const activeItems = selectedIdx !== null ? [items[selectedIdx]] : items;
+  const activeIdx = selectedIdx ?? 0;
+  const activeItem = items[activeIdx] ?? items[0] ?? null;
+
+  useEffect(() => {
+    setExpanded(false);
+    setDetailTab('ingredients');
+    setSelectedIdx(null);
+  }, [items.length]);
 
   return (
-    <View style={[ms.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={[ms.card, compact && ms.cardCompact, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       {/* Header */}
-      <View style={ms.header}>
+      <View style={[ms.header, compact && ms.headerCompact]}>
         <View style={[ms.iconWrap, { backgroundColor: color + '22' }]}>
           <Text style={ms.emoji}>{emoji}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[ms.title, { color: colors.text }]}>{title}</Text>
-          <Text style={[ms.meta, { color: colors.textTertiary }]}>
+          <Text style={[ms.title, compact && ms.titleCompact, { color: colors.text }]}>{title}</Text>
+          <Text style={[ms.meta, compact && ms.metaCompact, { color: colors.textTertiary }]}>
             ~{totalCal} kcal · {totalProt}g protein
           </Text>
         </View>
@@ -341,63 +300,140 @@ const MealSection = memo(function MealSection({
         </ScrollView>
       )}
 
-      {/* Items list */}
-      {activeItems.map((item, i) => (
-        <View key={selectedIdx !== null ? selectedIdx : i}>
-          <View
+      {/* Compact list */}
+      {items.map((item, i) => {
+        const active = i === activeIdx;
+        return (
+          <TouchableOpacity
+            key={`${item.name}-${i}`}
+            onPress={() => setSelectedIdx(i)}
+            activeOpacity={0.82}
             style={[
               ms.itemRow,
-              { borderTopWidth: 1, borderTopColor: colors.border },
+              compact && ms.itemRowCompact,
+              {
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+                backgroundColor: active ? color + '14' : 'transparent',
+              },
             ]}
           >
             <View style={[ms.dot, { backgroundColor: color }]} />
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={[ms.itemName, { color: colors.text }]}>{item.name}</Text>
-              {/* Per-ingredient amounts */}
-              {item.ingredients && item.ingredients.length > 0 ? (
-                <View style={ms.ingList}>
-                  {item.ingredients.map((ing, ii) => (
-                    <View key={ii} style={ms.ingRow}>
-                      <Text style={[ms.ingName, { color: colors.textSecondary }]}>{ing.name}</Text>
-                      <Text style={[ms.ingAmt, { color: color }]}>{ing.amount}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={[ms.itemQty, { color: colors.textSecondary }]}>{item.quantity}</Text>
-              )}
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[ms.itemName, compact && ms.itemNameCompact, { color: colors.text }]}>{item.name}</Text>
+              <Text style={[ms.itemQty, compact && ms.itemQtyCompact, { color: colors.textSecondary }]} numberOfLines={1}>
+                {item.quantity}
+              </Text>
             </View>
             <View style={ms.itemNutrition}>
               {item.calories != null && (
-                <Text style={[ms.itemCal, { color: colors.textTertiary }]}>{item.calories} kcal</Text>
+                <Text style={[ms.itemCal, compact && ms.itemCalCompact, { color: colors.textTertiary }]}>{item.calories} kcal</Text>
               )}
               {item.protein_g != null && item.protein_g > 0 && (
-                <Text style={[ms.itemProt, { color: '#3B82F6' }]}>{item.protein_g}g P</Text>
+                <Text style={[ms.itemProt, compact && ms.itemProtCompact, { color: '#3B82F6' }]}>{item.protein_g}g P</Text>
               )}
             </View>
-          </View>
+          </TouchableOpacity>
+        );
+      })}
 
-          {/* Cooking steps — shown when item selected or if only 1 item */}
-          {item.steps && item.steps.length > 0 && (selectedIdx !== null || items.length === 1) && (
-            <View style={[ms.stepsContainer, { backgroundColor: color + '0D', borderTopColor: colors.border, borderTopWidth: 1 }]}>
-              <Text style={[ms.stepsTitle, { color: color }]}>👣 Steps</Text>
-              {item.steps.map((s) => (
-                <View key={s.step} style={ms.stepRow}>
-                  <View style={[ms.stepBadge, { backgroundColor: color }]}>
-                    <Text style={ms.stepBadgeText}>{s.step}</Text>
-                  </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={[ms.stepInstruction, { color: colors.text }]}>{s.instruction}</Text>
-                    {s.time > 0 && (
-                      <Text style={[ms.stepTime, { color: color }]}>⏱ {s.time} min</Text>
-                    )}
-                  </View>
+      {!!activeItem && (
+        <View style={[ms.expandWrap, { borderTopColor: colors.border }]}> 
+          <TouchableOpacity
+            onPress={() => setExpanded((prev) => !prev)}
+            style={[ms.expandBtn, { borderColor: color, backgroundColor: expanded ? color + '16' : 'transparent' }]}
+            activeOpacity={0.8}
+          >
+            <Ionicons name={expanded ? 'chevron-up-outline' : 'chevron-down-outline'} size={14} color={color} />
+            <Text style={[ms.expandBtnText, { color }]}>
+              {expanded ? 'Hide Details' : 'Show More'}
+            </Text>
+          </TouchableOpacity>
+
+          {expanded && (
+            <View style={[ms.detailsCard, { backgroundColor: color + '0D', borderColor: colors.border }]}> 
+              <View style={ms.detailToggleRow}>
+                <TouchableOpacity
+                  onPress={() => setDetailTab('ingredients')}
+                  style={[
+                    ms.detailTabBtn,
+                    {
+                      backgroundColor: detailTab === 'ingredients' ? color : colors.background,
+                      borderColor: detailTab === 'ingredients' ? color : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[ms.detailTabText, { color: detailTab === 'ingredients' ? '#FFF' : colors.textSecondary }]}>
+                    Ingredients
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setDetailTab('steps')}
+                  style={[
+                    ms.detailTabBtn,
+                    {
+                      backgroundColor: detailTab === 'steps' ? color : colors.background,
+                      borderColor: detailTab === 'steps' ? color : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[ms.detailTabText, { color: detailTab === 'steps' ? '#FFF' : colors.textSecondary }]}>
+                    Steps
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {detailTab === 'ingredients' ? (
+                <View style={ms.partitionWrap}>
+                  {(activeItem.ingredients ?? []).length > 0 ? (
+                    activeItem.ingredients.map((ing, idx) => (
+                      <View
+                        key={`${ing.name}-${idx}`}
+                        style={[
+                          ms.partitionRow,
+                          { borderTopColor: colors.border, borderTopWidth: idx === 0 ? 0 : 1 },
+                        ]}
+                      >
+                        <Text style={[ms.ingName, { color: colors.text }]}>{ing.name}</Text>
+                        <Text style={[ms.ingAmt, { color }]}>{ing.amount || '-'}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={[ms.emptyHint, { color: colors.textTertiary }]}>No ingredient details available.</Text>
+                  )}
                 </View>
-              ))}
+              ) : (
+                <View style={ms.partitionWrap}>
+                  {(activeItem.steps ?? []).length > 0 ? (
+                    activeItem.steps.map((s, idx) => (
+                      <View
+                        key={s.step}
+                        style={[
+                          ms.partitionRow,
+                          ms.stepPartitionRow,
+                          { borderTopColor: colors.border, borderTopWidth: idx === 0 ? 0 : 1 },
+                        ]}
+                      >
+                        <View style={[ms.stepBadge, { backgroundColor: color }]}>
+                          <Text style={ms.stepBadgeText}>{s.step}</Text>
+                        </View>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={[ms.stepInstruction, { color: colors.text }]}>{s.instruction}</Text>
+                          {s.time > 0 && (
+                            <Text style={[ms.stepTime, { color: color }]}>⏱ {s.time} min</Text>
+                          )}
+                        </View>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={[ms.emptyHint, { color: colors.textTertiary }]}>No cooking steps available.</Text>
+                  )}
+                </View>
+              )}
             </View>
           )}
         </View>
-      ))}
+      )}
     </View>
   );
 });
@@ -452,6 +488,12 @@ interface UploadDialogState {
   iconColor: string;
 }
 
+type DailyPlanMap = Partial<Record<DayOfWeek, AIDietPlan>>;
+
+function normalizeMealName(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 const REQUIRED_FIELDS: { key: keyof UserHealthProfile; label: string }[] = [
   { key: 'age',           label: 'Age' },
   { key: 'gender',        label: 'Gender' },
@@ -485,6 +527,8 @@ const DIET_DISPLAY: Record<string, string> = {
 
 export function AiDietPlannerModal({ visible, onClose }: Props) {
   const { colors } = useTheme();
+  const { width, height } = useWindowDimensions();
+  const isCompact = width <= 360 || height <= 720;
   const scrollRef = useRef<ScrollView>(null);
   const router = useRouter();
   const { addMeal } = usePlannerStore();
@@ -494,6 +538,8 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState('');
   const [plan, setPlan] = useState<AIDietPlan | null>(null);
+  const [dailyPlans, setDailyPlans] = useState<DailyPlanMap>({});
+  const [previewDay, setPreviewDay] = useState<DayOfWeek>('Mon');
   const [savedProfile, setSavedProfile] = useState<UserFitnessProfile | null>(null);
   const [selectedDays, setSelectedDays] = useState<DayOfWeek[]>(['Mon']);
   const [addedDays, setAddedDays] = useState<DayOfWeek[]>([]);
@@ -503,11 +549,13 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isGeneratingMore, setIsGeneratingMore] = useState(false);
   const [isUploadingPlan, setIsUploadingPlan] = useState(false);
+  const [masterMatchCount, setMasterMatchCount] = useState(0);
   const [matchedPublicCount, setMatchedPublicCount] = useState(0);
   const [planOrigin, setPlanOrigin] = useState<PlanOrigin>('ai');
   const [planSourceLabel, setPlanSourceLabel] = useState('AI Generated');
   const [matchedPlanMeals, setMatchedPlanMeals] = useState<SavedAiDietPlanMeal[]>([]);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [showOptionalPrefs, setShowOptionalPrefs] = useState(false);
   const [uploadDialog, setUploadDialog] = useState<UploadDialogState>({
     visible: false,
     title: '',
@@ -549,12 +597,55 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
 
   const goalInfo = hp?.fitnessGoal ? GOAL_DISPLAY[hp.fitnessGoal] : null;
   const currentUserName = userProfile?.name?.trim() || 'MealMitra User';
+  const previewPlan = useMemo(() => {
+    if (!plan) return null;
+    return dailyPlans[previewDay] ?? plan;
+  }, [dailyPlans, plan, previewDay]);
+
+  const generatePlansForDays = useCallback(
+    async (fitnessProfile: UserFitnessProfile, selected: DayOfWeek[]) => {
+      const nutrition = calculateNutrition(fitnessProfile);
+      const byDay: DailyPlanMap = {};
+      const usedMealNames = new Set<string>();
+
+      for (const day of selected) {
+        const dayPrompt = [
+          fitnessProfile.customPrompt?.trim() || '',
+          `Generate a distinct plan for ${day}.`,
+          usedMealNames.size > 0
+            ? `Do not repeat these dish names: ${Array.from(usedMealNames).slice(0, 40).join(', ')}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+
+        const dayPlan = await generateAIDietPlan(
+          { ...fitnessProfile, customPrompt: dayPrompt },
+          nutrition
+        );
+
+        byDay[day] = dayPlan;
+
+        MEAL_MAP.forEach(({ key }) => {
+          dayPlan[key].forEach((item) => {
+            const n = normalizeMealName(item.name);
+            if (n) usedMealNames.add(n);
+          });
+        });
+      }
+
+      return { byDay, nutrition };
+    },
+    []
+  );
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const resetAll = () => {
     setStep('form');
     setError('');
     setPlan(null);
+    setDailyPlans({});
+    setPreviewDay('Mon');
     setSavedProfile(null);
     setAddedDays([]);
     setJustAdded(false);
@@ -564,11 +655,13 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
     setIsDeleting(false);
     setIsGeneratingMore(false);
     setIsUploadingPlan(false);
+    setMasterMatchCount(0);
     setMatchedPublicCount(0);
     setPlanOrigin('ai');
     setPlanSourceLabel('AI Generated');
     setMatchedPlanMeals([]);
     setDeleteConfirmVisible(false);
+    setShowOptionalPrefs(false);
     setUploadDialog((prev) => ({ ...prev, visible: false }));
   };
 
@@ -620,43 +713,32 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
         avoid: avoid.trim() || undefined,
         customPrompt: customPrompt.trim() || undefined,
       };
-      const nutrition = calculateNutrition(fitnessProfile);
-
-      const exactMatches = await findExactPublicDietPlans({
-        goal: fitnessProfile.goal,
-        dietType: fitnessProfile.diet_type,
-        calories: nutrition.target_calories,
-        days: selectedDays.length,
-        limit: 10,
-      });
-
-      if (exactMatches.length > 0) {
-        const matched = exactMatches[0];
-        const matchedPlan = (matched.plan_data ?? null) as AIDietPlan | null;
-        if (matchedPlan) {
-          setSavedProfile(fitnessProfile);
-          setPlan({
-            ...matchedPlan,
-            bmr: matchedPlan.bmr ?? nutrition.bmr,
-            tdee: matchedPlan.tdee ?? nutrition.tdee,
-          });
-          setSavedPlanId(matched.id);
-          setMatchedPlanMeals(matched.diet_plan_meals ?? []);
-          setPlanOrigin('public');
-          setPlanSourceLabel(matched.source_label || 'Public Plan');
-          setMatchedPublicCount(exactMatches.length);
-          setStep('result');
-          return;
-        }
+      const { byDay } = await generatePlansForDays(fitnessProfile, selectedDays);
+      const firstDay = selectedDays[0];
+      const result = byDay[firstDay] ?? Object.values(byDay)[0] ?? null;
+      if (!result) {
+        throw new Error('Could not generate day-wise plan. Please try again.');
       }
 
-      const result = await generateAIDietPlan(fitnessProfile, nutrition);
       setSavedProfile(fitnessProfile);
       setPlan(result);
+      setDailyPlans(byDay);
+      setPreviewDay(firstDay);
+      setMasterMatchCount(0);
 
       let generatedPlanId: string | null = null;
       try {
-        const saved = await saveAiDietPlan(userProfile?.id, result, selectedDays, fitnessProfile, []);
+        const saved = await saveAiDietPlan(
+          userProfile?.id,
+          {
+            ...result,
+            // Keep all day-wise plan data in plan_data for future expansion/history.
+            daily_plans: byDay,
+          } as AIDietPlan,
+          selectedDays,
+          fitnessProfile,
+          []
+        );
         generatedPlanId = saved.id;
       } catch (saveErr: any) {
         console.warn('[AiDietPlanner] Generated plan could not be auto-saved:', saveErr?.message ?? saveErr);
@@ -679,13 +761,30 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
     setIsGeneratingMore(true);
     setError('');
     try {
-      const nutrition = calculateNutrition(savedProfile);
-      const result = await generateAIDietPlan(savedProfile, nutrition);
+      const { byDay } = await generatePlansForDays(savedProfile, selectedDays);
+      const firstDay = selectedDays[0];
+      const result = byDay[firstDay] ?? Object.values(byDay)[0] ?? null;
+      if (!result) {
+        throw new Error('Could not generate day-wise plan. Please try again.');
+      }
+
       setPlan(result);
+      setDailyPlans(byDay);
+      setPreviewDay(firstDay);
+      setMasterMatchCount(0);
 
       let generatedPlanId: string | null = null;
       try {
-        const saved = await saveAiDietPlan(userProfile?.id, result, selectedDays, savedProfile, []);
+        const saved = await saveAiDietPlan(
+          userProfile?.id,
+          {
+            ...result,
+            daily_plans: byDay,
+          } as AIDietPlan,
+          selectedDays,
+          savedProfile,
+          []
+        );
         generatedPlanId = saved.id;
       } catch (saveErr: any) {
         console.warn('[AiDietPlanner] Additional generated plan could not be auto-saved:', saveErr?.message ?? saveErr);
@@ -753,6 +852,13 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
 
       setAddedDays(selectedDays);
       setJustAdded(true);
+      setUploadDialog({
+        visible: true,
+        title: 'Plan Added',
+        message: 'Meals have been added to your planner successfully.',
+        icon: 'checkmark-circle',
+        iconColor: '#22C55E',
+      });
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 350);
       return;
     }
@@ -762,51 +868,115 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
     };
     const goalLabel = savedProfile.goal.replace(/_/g, ' ');
 
-    // Build all recipe + planner pairs up front
-    const allPairs: Array<{ recipe: Recipe; day: DayOfWeek; mealType: MealType }> = [];
-    selectedDays.forEach((day) => {
-      MEAL_MAP.forEach(({ key, mealType }) => {
-        const items = plan[key];
-        if (!items || items.length === 0) return;
-        items.forEach((item) => {
-          const recipe = buildRecipeFromItem(
-            item,
+    // Build one unique recipe per day+meal slot.
+    const aiPlannerPairs: Array<{ recipe: Recipe; day: DayOfWeek; mealType: MealType }> = [];
+    const planMeals: AiDietPlanMealSelection[] = [];
+    const usedRecipeIds = new Set<string>();
+    const usedMealNames = new Set<string>();
+    let matchedFromMaster = 0;
+
+    const slotCandidates = new Map<string, string[]>();
+    const allCandidateNames = new Set<string>();
+
+    for (const day of selectedDays) {
+      const dayPlan = dailyPlans[day] ?? plan;
+      for (const { key, mealType } of MEAL_MAP) {
+        const items = dayPlan[key];
+        if (!items || items.length === 0) continue;
+        const names = Array.from(new Set(items.map((item) => item.name).filter(Boolean)));
+        slotCandidates.set(`${day}-${mealType}`, names);
+        names.forEach((name) => allCandidateNames.add(name));
+      }
+    }
+
+    let batchedMatches = new Map<string, Array<{ recipeId: string; recipeSource: 'master' }>>();
+    try {
+      batchedMatches = await findMasterRecipeMatchesForMealsBatch({
+        mealNames: Array.from(allCandidateNames),
+        dietType: savedProfile.diet_type,
+      });
+    } catch (batchErr) {
+      console.warn('[AiDietPlanner] master recipe batch match failed:', batchErr);
+    }
+
+    for (const day of selectedDays) {
+      const dayPlan = dailyPlans[day] ?? plan;
+
+      for (const { key, mealType } of MEAL_MAP) {
+        const items = dayPlan[key];
+        if (!items || items.length === 0) continue;
+
+        const uniqueItem =
+          items.find((item) => !usedMealNames.has(normalizeMealName(item.name))) ??
+          items[0];
+        const fallbackItem = uniqueItem;
+
+        const candidateNames = slotCandidates.get(`${day}-${mealType}`) ?? [];
+        let matched: { recipeId: string; recipeSource: 'master' } | null = null;
+        for (const candidateName of candidateNames) {
+          const keyName = normalizeMealName(candidateName);
+          const options = batchedMatches.get(keyName) ?? [];
+          const unused = options.find((opt) => !usedRecipeIds.has(opt.recipeId));
+          if (unused) {
+            matched = unused;
+            break;
+          }
+        }
+
+        if (matched) {
+          usedRecipeIds.add(matched.recipeId);
+          if (fallbackItem?.name) usedMealNames.add(normalizeMealName(fallbackItem.name));
+          matchedFromMaster += 1;
+          addMeal(day, mealType, matched.recipeId, 1, matched.recipeSource);
+          planMeals.push({
+            day,
             mealType,
-            goalLabel,
-            savedProfile.diet_type,
-            plan,
-            fractions[key]
-          );
-          allPairs.push({ recipe, day, mealType });
-        });
+            recipeId: matched.recipeId,
+            recipeSource: matched.recipeSource,
+            servings: 1,
+          });
+          continue;
+        }
+
+        const recipe = buildRecipeFromItem(
+          fallbackItem,
+          mealType,
+          goalLabel,
+          savedProfile.diet_type,
+          dayPlan,
+          fractions[key]
+        );
+        usedRecipeIds.add(recipe.id);
+        usedMealNames.add(normalizeMealName(fallbackItem.name));
+        aiPlannerPairs.push({ recipe, day, mealType });
+      }
+    }
+
+    // Insert only fallback AI recipes into user_ai_generated_recipes first.
+    await addAiRecipes(aiPlannerPairs.map((p) => p.recipe));
+
+    aiPlannerPairs.forEach(({ recipe, day, mealType }) => {
+      addMeal(day, mealType, recipe.id, 1, 'ai');
+      planMeals.push({
+        day,
+        mealType,
+        recipeId: recipe.id,
+        recipeSource: 'ai',
+        servings: 1,
       });
     });
 
-    // Insert AI recipes into user_ai_generated_recipes first so IDs are persisted.
-    await addAiRecipes(allPairs.map((p) => p.recipe));
-
-    const planMeals: AiDietPlanMealSelection[] = Array.from(
-      new Map(
-        allPairs.map(({ day, mealType, recipe }) => [
-          `${day}-${mealType}`,
-          {
-            day,
-            mealType,
-            recipeId: recipe.id,
-            recipeSource: 'ai' as const,
-            servings: 1,
-          },
-        ])
-      ).values()
-    );
-
-    // Now that recipes are in DB, add them to the planner
-    allPairs.forEach(({ recipe, day, mealType }) => {
-      addMeal(day, mealType, recipe.id, 1, 'ai');
-    });
+    setMasterMatchCount(matchedFromMaster);
 
     setAddedDays(selectedDays);
     setJustAdded(true);
+    setUploadDialog({
+      visible: true,
+      title: 'Plan Added',
+      message: 'Meals have been added to your planner successfully.',
+      icon: 'checkmark-circle',
+      iconColor: '#22C55E',
+    });
 
     // Save / link plan-meals in Supabase.
     setIsSaving(true);
@@ -860,8 +1030,8 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
   };
 
   const macroTotal = useMemo(
-    () => plan ? (plan.protein_g ?? 0) + (plan.carbs_g ?? 0) + (plan.fat_g ?? 0) : 0,
-    [plan]
+    () => previewPlan ? (previewPlan.protein_g ?? 0) + (previewPlan.carbs_g ?? 0) + (previewPlan.fat_g ?? 0) : 0,
+    [previewPlan]
   );
 
   return (
@@ -869,19 +1039,19 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
       <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
         <View style={styles.overlay}>
           <Pressable style={[StyleSheet.absoluteFillObject, { backgroundColor: 'transparent' }]} onPress={handleClose} />
-          <View style={[styles.sheet, { backgroundColor: colors.card }]}>
+          <View style={[styles.sheet, isCompact && styles.sheetCompact, { backgroundColor: colors.card }]}>
           {/* Handle bar */}
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
 
           {/* Header */}
-          <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
+          <View style={[styles.sheetHeader, isCompact && styles.sheetHeaderCompact, { borderBottomColor: colors.border }]}>
             <View style={styles.headerLeft}>
               <View style={[styles.aiIconBadge, { backgroundColor: colors.accent + '22' }]}>
                 <Ionicons name="sparkles" size={18} color={colors.accent} />
               </View>
               <View>
-                <Text style={[styles.headerTitle, { color: colors.text }]}>MealMitra AI Coach</Text>
-                <Text style={[styles.headerSubtitle, { color: colors.textTertiary }]}>
+                <Text style={[styles.headerTitle, isCompact && styles.headerTitleCompact, { color: colors.text }]}>MealMitra AI Coach</Text>
+                <Text style={[styles.headerSubtitle, isCompact && styles.headerSubtitleCompact, { color: colors.textTertiary }]}>
                   {step === 'result' ? 'Review your personalized plan' : 'AI-powered diet planner'}
                 </Text>
               </View>
@@ -913,7 +1083,7 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
           >
             {/* ── FORM STEP ── */}
             {step === 'form' && (
-              <View style={styles.formContainer}>
+              <View style={[styles.formContainer, isCompact && styles.formContainerCompact]}>
 
                 {/* Profile Summary Card  /  Incomplete Warning */}
                 {profileComplete && hp ? (
@@ -1018,73 +1188,92 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
                   onToggle={toggleDay}
                   onToggleAll={toggleAllDays}
                   colors={colors}
+                  compact={isCompact}
                 />
 
-                {/* Foods to Avoid */}
-                <Text style={[styles.sectionLabel, { color: colors.text }]}>
-                  🚫 Foods to Avoid{' '}
-                  <Text style={{ color: colors.textTertiary, fontWeight: '400' }}>(optional)</Text>
-                </Text>
-                <TextInput
-                  style={[styles.textArea, {
-                    backgroundColor: colors.surface,
-                    color: colors.text,
-                    borderColor: colors.border,
-                  }]}
-                  placeholder="e.g. mushroom, broccoli, peanuts..."
-                  placeholderTextColor={colors.textTertiary}
-                  value={avoid}
-                  onChangeText={setAvoid}
-                />
-
-                {/* Custom Preferences */}
-                <Text style={[styles.sectionLabel, { color: colors.text }]}>
-                  ✨ Preferences{' '}
-                  <Text style={{ color: colors.textTertiary, fontWeight: '400' }}>(optional)</Text>
-                </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.suggestionScroll}
-                  contentContainerStyle={styles.suggestionRow}
-                >
-                  {PROMPT_SUGGESTIONS.map((s) => (
-                    <TouchableOpacity
-                      key={s}
-                      onPress={() =>
-                        setCustomPrompt((p) => {
-                          if (p.includes(s)) return p.replace(`, ${s}`, '').replace(s, '').trim().replace(/^,\s*/, '');
-                          return p ? `${p}, ${s}` : s;
-                        })
-                      }
-                      style={[styles.suggestionChip, {
-                        backgroundColor: customPrompt.includes(s) ? colors.accent + '22' : colors.surface,
-                        borderColor: customPrompt.includes(s) ? colors.accent : colors.border,
-                      }]}
-                    >
-                      <Text style={[styles.suggestionChipText, {
-                        color: customPrompt.includes(s) ? colors.accent : colors.textSecondary,
-                      }]}>
-                        {s}
+                {/* Optional personalization */}
+                <View style={[styles.optionalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <TouchableOpacity
+                    style={styles.optionalHeader}
+                    onPress={() => setShowOptionalPrefs((prev) => !prev)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.optionalTitle, { color: colors.text }]}>Optional Preferences</Text>
+                      <Text style={[styles.optionalHint, { color: colors.textTertiary }]}>
+                        Add foods to avoid or style preferences
                       </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-                <TextInput
-                  style={[styles.textArea, {
-                    backgroundColor: colors.surface,
-                    color: colors.text,
-                    borderColor: colors.border,
-                    minHeight: 64,
-                  }]}
-                  placeholder="e.g. South Indian style, low budget, no garlic..."
-                  placeholderTextColor={colors.textTertiary}
-                  value={customPrompt}
-                  onChangeText={setCustomPrompt}
-                  multiline
-                  numberOfLines={2}
-                  textAlignVertical="top"
-                />
+                    </View>
+                    <Ionicons
+                      name={showOptionalPrefs ? 'chevron-up-outline' : 'chevron-down-outline'}
+                      size={16}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+
+                  {showOptionalPrefs && (
+                    <>
+                      <Text style={[styles.sectionLabel, { color: colors.text }]}>Foods to Avoid</Text>
+                      <TextInput
+                        style={[styles.textArea, {
+                          backgroundColor: colors.background,
+                          color: colors.text,
+                          borderColor: colors.border,
+                        }]}
+                        placeholder="e.g. mushroom, broccoli, peanuts"
+                        placeholderTextColor={colors.textTertiary}
+                        value={avoid}
+                        onChangeText={setAvoid}
+                      />
+
+                      <Text style={[styles.sectionLabel, { color: colors.text }]}>Preferences</Text>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.suggestionScroll}
+                        contentContainerStyle={styles.suggestionRow}
+                      >
+                        {PROMPT_SUGGESTIONS.map((s) => (
+                          <TouchableOpacity
+                            key={s}
+                            onPress={() =>
+                              setCustomPrompt((p) => {
+                                if (p.includes(s)) return p.replace(`, ${s}`, '').replace(s, '').trim().replace(/^,\s*/, '');
+                                return p ? `${p}, ${s}` : s;
+                              })
+                            }
+                            style={[styles.suggestionChip, {
+                              backgroundColor: customPrompt.includes(s) ? colors.accent + '22' : colors.background,
+                              borderColor: customPrompt.includes(s) ? colors.accent : colors.border,
+                            }]}
+                          >
+                            <Text style={[styles.suggestionChipText, {
+                              color: customPrompt.includes(s) ? colors.accent : colors.textSecondary,
+                            }]}>
+                              {s}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+
+                      <TextInput
+                        style={[styles.textArea, {
+                          backgroundColor: colors.background,
+                          color: colors.text,
+                          borderColor: colors.border,
+                          minHeight: 64,
+                        }]}
+                        placeholder="e.g. South Indian style, low budget, no garlic"
+                        placeholderTextColor={colors.textTertiary}
+                        value={customPrompt}
+                        onChangeText={setCustomPrompt}
+                        multiline
+                        numberOfLines={2}
+                        textAlignVertical="top"
+                      />
+                    </>
+                  )}
+                </View>
 
                 {/* Error */}
                 {error !== '' && (
@@ -1136,7 +1325,7 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
                 </Text>
                 <View style={[styles.loadingTips, { backgroundColor: colors.surface }]}>
                   <Text style={[styles.loadingTipsText, { color: colors.textSecondary }]}>
-                    {'🧮 Calculating TDEE with Mifflin St Jeor formula\n🥗 Selecting optimal Indian meals\n📊 Balancing macros for your goal'}
+                    {'Calculating calories and macros\nSelecting practical Indian meals\nBalancing nutrition for your goal'}
                     {customPrompt ? `\n✨ Applying: ${customPrompt}` : ''}
                   </Text>
                 </View>
@@ -1144,8 +1333,8 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
             )}
 
             {/* ── RESULT STEP ── */}
-            {step === 'result' && plan && (
-              <View style={styles.resultContainer}>
+            {step === 'result' && previewPlan && (
+              <View style={[styles.resultContainer, isCompact && styles.resultContainerCompact]}>
                 <View style={[styles.sourceCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.sourceTopRow}>
                     <Text style={[styles.sourceTitle, { color: colors.text }]}>Plan Source</Text>
@@ -1161,43 +1350,76 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
                       Matched {matchedPublicCount} public plan{matchedPublicCount > 1 ? 's' : ''}.
                     </Text>
                   )}
+                  {masterMatchCount > 0 && (
+                    <Text style={[styles.sourceHint, { color: colors.textTertiary }]}>
+                      {masterMatchCount} slots will use exact matches from master recipes.
+                    </Text>
+                  )}
                 </View>
+
+                {selectedDays.length > 1 && (
+                  <View style={[styles.dayPreviewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Text style={[styles.dayPreviewTitle, { color: colors.text }]}>Preview Day Plan</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayPreviewRow}>
+                      {selectedDays.map((day) => {
+                        const active = previewDay === day;
+                        return (
+                          <TouchableOpacity
+                            key={day}
+                            onPress={() => setPreviewDay(day)}
+                            style={[
+                              styles.dayPreviewChip,
+                              {
+                                backgroundColor: active ? colors.accent : colors.background,
+                                borderColor: active ? colors.accent : colors.border,
+                              },
+                            ]}
+                          >
+                            <Text style={[styles.dayPreviewChipText, { color: active ? '#FFF' : colors.textSecondary }]}>
+                              {day}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
 
                 {/* Summary card */}
                 <View style={[styles.summaryCard, { backgroundColor: colors.accent }]}>
                   <Text style={styles.summaryTitle}>🎯 Your Daily Target</Text>
                   <View style={styles.summaryRow}>
                     <View style={styles.summaryStat}>
-                      <Text style={styles.summaryStatVal}>{plan.total_calories}</Text>
+                      <Text style={styles.summaryStatVal}>{previewPlan.total_calories}</Text>
                       <Text style={styles.summaryStatLabel}>Calories</Text>
                     </View>
                     <View style={styles.summarySep} />
                     <View style={styles.summaryStat}>
-                      <Text style={styles.summaryStatVal}>{plan.protein_g}g</Text>
+                      <Text style={styles.summaryStatVal}>{previewPlan.protein_g}g</Text>
                       <Text style={styles.summaryStatLabel}>Protein</Text>
                     </View>
                     <View style={styles.summarySep} />
                     <View style={styles.summaryStat}>
-                      <Text style={styles.summaryStatVal}>{plan.carbs_g}g</Text>
+                      <Text style={styles.summaryStatVal}>{previewPlan.carbs_g}g</Text>
                       <Text style={styles.summaryStatLabel}>Carbs</Text>
                     </View>
                     <View style={styles.summarySep} />
                     <View style={styles.summaryStat}>
-                      <Text style={styles.summaryStatVal}>{plan.fat_g}g</Text>
+                      <Text style={styles.summaryStatVal}>{previewPlan.fat_g}g</Text>
                       <Text style={styles.summaryStatLabel}>Fat</Text>
                     </View>
                   </View>
                   <View style={styles.tdeeRow}>
-                    <Text style={styles.tdeeText}>BMR: {plan.bmr} kcal</Text>
+                    <Text style={styles.tdeeText}>BMR: {previewPlan.bmr} kcal</Text>
                     <View style={styles.tdeeDot} />
-                    <Text style={styles.tdeeText}>TDEE: {plan.tdee} kcal</Text>
+                    <Text style={styles.tdeeText}>TDEE: {previewPlan.tdee} kcal</Text>
                   </View>
                   <View style={[styles.tdeeRow, { marginTop: 2 }]}>
                     <Ionicons name="calendar-outline" size={12} color="rgba(255,255,255,0.85)" />
                     <Text style={styles.tdeeText}>
-                      {selectedDays.length === 7
-                        ? 'Full week · 7 days'
-                        : `${selectedDays.length} day${selectedDays.length > 1 ? 's' : ''} · ${selectedDays.join(', ')}`}
+                      {selectedDays.length > 1
+                        ? `Showing ${previewDay} · ${selectedDays.length} days selected`
+                        : `Showing ${previewDay}`}
                     </Text>
                   </View>
                 </View>
@@ -1205,9 +1427,9 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
                 {/* Macro bars */}
                 <View style={[styles.macroCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <Text style={[styles.macroTitle, { color: colors.text }]}>Macro Distribution</Text>
-                  <MacroBar label="Protein" value={plan.protein_g} unit="g" color="#3B82F6" total={macroTotal} colors={colors} />
-                  <MacroBar label="Carbs" value={plan.carbs_g} unit="g" color="#F59E0B" total={macroTotal} colors={colors} />
-                  <MacroBar label="Fat" value={plan.fat_g} unit="g" color="#EF4444" total={macroTotal} colors={colors} />
+                  <MacroBar label="Protein" value={previewPlan.protein_g} unit="g" color="#3B82F6" total={macroTotal} colors={colors} />
+                  <MacroBar label="Carbs" value={previewPlan.carbs_g} unit="g" color="#F59E0B" total={macroTotal} colors={colors} />
+                  <MacroBar label="Fat" value={previewPlan.fat_g} unit="g" color="#EF4444" total={macroTotal} colors={colors} />
                 </View>
 
                 {/* Meals — scroll through to review */}
@@ -1216,30 +1438,31 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
                     key={section.key}
                     title={section.label}
                     emoji={section.emoji}
-                    items={plan[section.key]}
+                    items={previewPlan[section.key]}
                     colors={colors}
                     accentColor={section.color}
+                    compact={isCompact}
                   />
                 ))}
 
                 {/* Coach tip */}
-                {plan.coach_tip && (
+                {previewPlan.coach_tip && (
                   <View style={[styles.tipCard, { backgroundColor: colors.accent + '15', borderColor: colors.accent + '44' }]}>
                     <Ionicons name="fitness-outline" size={18} color={colors.accent} />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.tipTitle, { color: colors.accent }]}>Coach Tip</Text>
-                      <Text style={[styles.tipText, { color: colors.text }]}>{plan.coach_tip}</Text>
+                      <Text style={[styles.tipText, { color: colors.text }]}>{previewPlan.coach_tip}</Text>
                     </View>
                   </View>
                 )}
 
                 {/* Hydration tip */}
-                {plan.hydration_tip && (
+                {previewPlan.hydration_tip && (
                   <View style={[styles.tipCard, { backgroundColor: '#3B82F615', borderColor: '#3B82F644' }]}>
                     <Ionicons name="water-outline" size={18} color="#3B82F6" />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.tipTitle, { color: '#3B82F6' }]}>Hydration</Text>
-                      <Text style={[styles.tipText, { color: colors.text }]}>{plan.hydration_tip}</Text>
+                      <Text style={[styles.tipText, { color: colors.text }]}>{previewPlan.hydration_tip}</Text>
                     </View>
                   </View>
                 )}
@@ -1252,8 +1475,8 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
                       <Text style={[styles.successTitle, { color: '#22C55E' }]}>Added to Planner!</Text>
                       <Text style={[styles.successSubtitle, { color: colors.textSecondary }]}>
                         {addedDays.length === 7
-                          ? 'Full week added — individual recipes per meal'
-                          : `${addedDays.join(', ')} · recipes added per meal`}
+                          ? 'Full week added with one recipe per meal slot'
+                          : `${addedDays.join(', ')} added with one recipe per meal slot`}
                       </Text>
                       {isSaving && (
                         <Text style={[styles.successSubtitle, { color: colors.textTertiary, marginTop: 4 }]}>
@@ -1300,10 +1523,8 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
                   />
                   <Text style={styles.primaryBtnText}>
                     {justAdded
-                      ? 'Done — View Planner →'
-                      : selectedDays.length === 7
-                      ? 'Add to Full Week (7 days)'
-                      : `Add to ${selectedDays.join(' · ')}`}
+                      ? 'View Planner'
+                      : 'Save to Planner'}
                   </Text>
                 </TouchableOpacity>
 
@@ -1391,6 +1612,9 @@ const styles = StyleSheet.create({
     height: '93%',
     width: '100%',
   },
+  sheetCompact: {
+    height: '95%',
+  },
   handle: {
     width: 40,
     height: 4,
@@ -1407,6 +1631,11 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
     gap: Spacing.sm,
+  },
+  sheetHeaderCompact: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    gap: 6,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -1425,9 +1654,15 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.md,
     fontWeight: '800',
   },
+  headerTitleCompact: {
+    fontSize: Typography.fontSize.sm,
+  },
   headerSubtitle: {
     fontSize: Typography.fontSize.xs,
     marginTop: 1,
+  },
+  headerSubtitleCompact: {
+    fontSize: 11,
   },
   backBtn: {
     flexDirection: 'row',
@@ -1451,6 +1686,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.base,
     paddingTop: Spacing.md,
     gap: Spacing.sm,
+  },
+  formContainerCompact: {
+    paddingHorizontal: Spacing.sm,
+    paddingTop: Spacing.sm,
+    gap: 6,
   },
   sectionLabel: {
     fontSize: Typography.fontSize.sm,
@@ -1485,6 +1725,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 12,
     fontSize: Typography.fontSize.sm,
+  },
+  optionalCard: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  optionalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  optionalTitle: {
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '700',
+  },
+  optionalHint: {
+    fontSize: Typography.fontSize.xs,
+    marginTop: 1,
   },
   suggestionScroll: {
     marginBottom: 4,
@@ -1577,6 +1836,11 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.md,
     gap: Spacing.md,
   },
+  resultContainerCompact: {
+    paddingHorizontal: Spacing.sm,
+    paddingTop: Spacing.sm,
+    gap: Spacing.sm,
+  },
   sourceCard: {
     borderWidth: 1,
     borderRadius: BorderRadius.lg,
@@ -1600,6 +1864,31 @@ const styles = StyleSheet.create({
   },
   sourceHint: {
     fontSize: Typography.fontSize.xs,
+  },
+  dayPreviewCard: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.sm,
+    gap: 8,
+  },
+  dayPreviewTitle: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.35,
+  },
+  dayPreviewRow: {
+    gap: 8,
+  },
+  dayPreviewChip: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  dayPreviewChipText: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
   },
   summaryCard: {
     borderRadius: BorderRadius.xl,
@@ -1739,14 +2028,23 @@ const ds = StyleSheet.create({
     gap: 8,
     paddingTop: 4,
   },
+  containerCompact: {
+    gap: 6,
+  },
   label: {
     fontSize: Typography.fontSize.sm,
     fontWeight: '700',
+  },
+  labelCompact: {
+    fontSize: Typography.fontSize.xs,
   },
   row: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  rowCompact: {
+    gap: 6,
   },
   chip: {
     paddingHorizontal: 14,
@@ -1754,39 +2052,23 @@ const ds = StyleSheet.create({
     borderRadius: BorderRadius.full,
     borderWidth: 1.5,
   },
+  chipCompact: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
   chipText: {
     fontSize: Typography.fontSize.sm,
     fontWeight: '700',
+  },
+  chipTextCompact: {
+    fontSize: Typography.fontSize.xs,
   },
   hint: {
     fontSize: Typography.fontSize.xs,
     marginTop: 2,
   },
-});
-
-// ─── OptionGroup styles ───────────────────────────────────────────────────────
-
-const og = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1.5,
-  },
-  chipIcon: {
-    fontSize: 14,
-  },
-  chipLabel: {
-    fontSize: Typography.fontSize.sm,
-    fontWeight: '600',
+  hintCompact: {
+    fontSize: 11,
   },
 });
 
@@ -1798,11 +2080,18 @@ const ms = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
+  cardCompact: {
+    borderRadius: BorderRadius.md,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
     padding: Spacing.md,
+  },
+  headerCompact: {
+    padding: Spacing.sm,
+    gap: 6,
   },
   iconWrap: {
     width: 38,
@@ -1818,9 +2107,15 @@ const ms = StyleSheet.create({
     fontSize: Typography.fontSize.base,
     fontWeight: '700',
   },
+  titleCompact: {
+    fontSize: Typography.fontSize.sm,
+  },
   meta: {
     fontSize: Typography.fontSize.xs,
     marginTop: 1,
+  },
+  metaCompact: {
+    fontSize: 11,
   },
   itemRow: {
     flexDirection: 'row',
@@ -1828,6 +2123,10 @@ const ms = StyleSheet.create({
     gap: 10,
     paddingHorizontal: Spacing.md,
     paddingVertical: 10,
+  },
+  itemRowCompact: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 8,
   },
   dot: {
     width: 7,
@@ -1838,9 +2137,15 @@ const ms = StyleSheet.create({
     fontSize: Typography.fontSize.sm,
     fontWeight: '600',
   },
+  itemNameCompact: {
+    fontSize: Typography.fontSize.xs,
+  },
   itemQty: {
     fontSize: Typography.fontSize.xs,
     marginTop: 1,
+  },
+  itemQtyCompact: {
+    fontSize: 11,
   },
   itemNutrition: {
     alignItems: 'flex-end',
@@ -1850,27 +2155,79 @@ const ms = StyleSheet.create({
     fontSize: Typography.fontSize.xs,
     fontWeight: '600',
   },
+  itemCalCompact: {
+    fontSize: 11,
+  },
   itemProt: {
     fontSize: Typography.fontSize.xs,
     fontWeight: '700',
   },
-  // Per-ingredient rows inside MealSection
-  ingList: {
-    gap: 2,
-    marginTop: 2,
+  itemProtCompact: {
+    fontSize: 11,
   },
-  ingRow: {
+  expandWrap: {
+    borderTopWidth: 1,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    gap: 8,
+  },
+  expandBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  expandBtnText: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
+  },
+  detailsCard: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+  },
+  detailToggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: 8,
+  },
+  detailTabBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: BorderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  detailTabText: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
+  },
+  partitionWrap: {
+    paddingHorizontal: Spacing.sm,
+    paddingBottom: Spacing.sm,
+  },
+  partitionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 1,
+    gap: 10,
+    paddingVertical: 10,
+  },
+  stepPartitionRow: {
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
   },
   ingName: {
-    fontSize: Typography.fontSize.xs,
+    fontSize: Typography.fontSize.sm,
     flex: 1,
   },
   ingAmt: {
-    fontSize: Typography.fontSize.xs,
+    fontSize: Typography.fontSize.sm,
     fontWeight: '700',
     marginLeft: 8,
   },
@@ -1885,25 +2242,6 @@ const ms = StyleSheet.create({
   recipeChipText: {
     fontSize: Typography.fontSize.xs,
     fontWeight: '700',
-  },
-  // Steps inside MealSection
-  stepsContainer: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    gap: 8,
-  },
-  stepsTitle: {
-    fontSize: Typography.fontSize.xs,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    paddingVertical: 4,
   },
   stepBadge: {
     width: 22,
@@ -1925,6 +2263,10 @@ const ms = StyleSheet.create({
   stepTime: {
     fontSize: Typography.fontSize.xs,
     fontWeight: '600',
+  },
+  emptyHint: {
+    fontSize: Typography.fontSize.xs,
+    paddingVertical: Spacing.sm,
   },
 });
 

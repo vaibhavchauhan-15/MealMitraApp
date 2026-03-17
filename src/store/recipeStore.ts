@@ -10,6 +10,7 @@ import {
   getRecipeCount,
   getRecipeByIdFromSource,
   getSimilarRecipesFromDb,
+  invalidateRecipeQueryCaches,
 } from '../services/searchService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -290,6 +291,7 @@ export const useRecipeStore = create<RecipeState>()(
           .from('user_ai_generated_recipes')
           .upsert(recipeToAiDbRow(recipe, uid), { onConflict: 'id' });
         if (error) console.warn('[RecipeStore] addAiRecipe:', error.message);
+        else void invalidateRecipeQueryCaches();
       },
 
       addAiRecipes: async (recipes) => {
@@ -311,6 +313,7 @@ export const useRecipeStore = create<RecipeState>()(
           .from('user_ai_generated_recipes')
           .upsert(rows, { onConflict: 'id' });
         if (error) console.warn('[RecipeStore] addAiRecipes:', error.message);
+        else void invalidateRecipeQueryCaches();
       },
 
       removeAiRecipe: (id) => {
@@ -327,6 +330,7 @@ export const useRecipeStore = create<RecipeState>()(
             .eq('user_id', uid)
             .then(({ error }) => {
               if (error) console.warn('[RecipeStore] removeAiRecipe:', error.message);
+              else void invalidateRecipeQueryCaches();
             });
         });
       },

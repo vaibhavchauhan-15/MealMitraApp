@@ -69,12 +69,17 @@ export function ConfirmModal({
               <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
               <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>
 
-              <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
               <View style={[styles.actions, !hideCancelButton && onCancel && styles.actionsRow]}>
                 {!hideCancelButton && onCancel && (
                   <TouchableOpacity
-                    style={[styles.btn, styles.cancelBtn, { backgroundColor: colors.surface }]}
+                    style={[
+                      styles.btn,
+                      styles.cancelBtn,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
                     onPress={onCancel}
                     activeOpacity={0.75}
                   >
@@ -89,6 +94,7 @@ export function ConfirmModal({
                     styles.confirmBtn,
                     {
                       backgroundColor: destructive ? colors.error : colors.accent,
+                      borderColor: destructive ? colors.error : colors.accent,
                       flex: hideCancelButton ? 1 : undefined,
                     },
                   ]}
@@ -116,6 +122,8 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     paddingTop: 28,
     paddingHorizontal: 24,
     paddingBottom: 20,
@@ -145,13 +153,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 21,
   },
-  divider: {
-    height: 1,
-    alignSelf: 'stretch',
-    marginVertical: 20,
-  },
   actions: {
     alignSelf: 'stretch',
+    paddingTop: 18,
   },
   actionsRow: {
     flexDirection: 'row',
@@ -161,8 +165,10 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 48,
     borderRadius: 14,
+    borderWidth: 1.2,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 16,
   },
   cancelBtn: {},
   confirmBtn: {},

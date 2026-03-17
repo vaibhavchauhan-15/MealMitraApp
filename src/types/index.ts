@@ -144,7 +144,9 @@ export interface UserProfile {
   id: string;
   name: string;
   email: string;
+  username?: string;
   avatar?: string;
+  avatarIcon?: string;
 
   // Food & cooking preferences
   /** Multiple diet preferences — a user may eat both Vegetarian and Non-Vegetarian */

@@ -4,6 +4,14 @@
 
 import { supabase } from './supabase';
 import { Recipe, DbRecipeRow, RecipeFilters, UserProfile, mapDbToRecipe, RecipeSource } from '../types';
+import { getCachedOrFetch, invalidateCache } from '../utils/queryCache';
+
+const CACHE_TTL = {
+  count: 1000 * 60 * 10,
+  homeSection: 1000 * 60 * 15,
+  personalized: 1000 * 60 * 8,
+  recipeDetail: 1000 * 60 * 20,
+};
 
 function normalizeIngredientToken(value: string): string {
   return value.trim().toLowerCase();
@@ -85,20 +93,29 @@ export async function getTotalRecipeCount(): Promise<number> {
 
   // Deduplicate concurrent callers: share one in-flight request
   if (!_countPromise) {
-    _countPromise = supabase
-      .from('master_recipes')
-      .select('*', { count: 'exact', head: true })
-      .is('deleted_at', null)
-      .eq('is_public', true)
-      .then(({ count, error }) => {
-        _countPromise = null;
-        if (error) { console.warn('[searchService] getTotalRecipeCount:', error.message); return 1000; }
-        _cachedCount = count ?? 1000;
-        return _cachedCount;
-      }) as Promise<number>;
+    _countPromise = getCachedOrFetch('search:total-recipe-count', CACHE_TTL.count, async () => {
+      const { count, error } = await supabase
+        .from('master_recipes')
+        .select('*', { count: 'exact', head: true })
+        .is('deleted_at', null)
+        .eq('is_public', true);
+      if (error) { console.warn('[searchService] getTotalRecipeCount:', error.message); return 1000; }
+      return count ?? 1000;
+    }).then((value) => {
+      _countPromise = null;
+      _cachedCount = value;
+      return value;
+    }) as Promise<number>;
   }
 
   return _countPromise ?? Promise.resolve(1000);
+}
+
+/** Clears all recipe/search query caches so post-mutation reads are fresh. */
+export async function invalidateRecipeQueryCaches(): Promise<void> {
+  _cachedCount = null;
+  _countPromise = null;
+  await invalidateCache('search:');
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────
@@ -136,56 +153,66 @@ export async function searchRecipes(
 
 /** Featured recipes – recency-first list, with rating tie-breaker when available. */
 export async function getFeaturedRecipes(limit = 8): Promise<Recipe[]> {
-  const { data, error } = await base()
-    .limit(Math.max(limit * 4, 40))
-    .order('updated_at', { ascending: false });
-  if (error) { console.warn('[searchService] getFeaturedRecipes:', error.message); return []; }
-  return (data ?? [])
-    .map((r) => mapDbToRecipe(toDbRecipeRow(r)))
-    .sort((a, b) => b.rating - a.rating)
-    .slice(0, limit);
+  return getCachedOrFetch(`search:featured:${limit}`, CACHE_TTL.homeSection, async () => {
+    const { data, error } = await base()
+      .limit(Math.max(limit * 4, 40))
+      .order('updated_at', { ascending: false });
+    if (error) { console.warn('[searchService] getFeaturedRecipes:', error.message); return []; }
+    return (data ?? [])
+      .map((r) => mapDbToRecipe(toDbRecipeRow(r)))
+      .sort((a, b) => b.rating - a.rating)
+      .slice(0, limit);
+  });
 }
 
 /** Trending recipes – recency-first list, with review-count tie-breaker when available. */
 export async function getTrendingRecipes(limit = 8): Promise<Recipe[]> {
-  const { data, error } = await base()
-    .limit(Math.max(limit * 4, 40))
-    .order('updated_at', { ascending: false });
-  if (error) { console.warn('[searchService] getTrendingRecipes:', error.message); return []; }
-  return (data ?? [])
-    .map((r) => mapDbToRecipe(toDbRecipeRow(r)))
-    .sort((a, b) => b.reviews - a.reviews)
-    .slice(0, limit);
+  return getCachedOrFetch(`search:trending:${limit}`, CACHE_TTL.homeSection, async () => {
+    const { data, error } = await base()
+      .limit(Math.max(limit * 4, 40))
+      .order('updated_at', { ascending: false });
+    if (error) { console.warn('[searchService] getTrendingRecipes:', error.message); return []; }
+    return (data ?? [])
+      .map((r) => mapDbToRecipe(toDbRecipeRow(r)))
+      .sort((a, b) => b.reviews - a.reviews)
+      .slice(0, limit);
+  });
 }
 
 /** Quick recipes – cook_time ≤ 20 min. Uses idx_recipes_cook_time. */
 export async function getQuickRecipes(limit = 8): Promise<Recipe[]> {
-  const { data, error } = await base()
-    .lte('cook_time', 20)
-    .limit(limit)
-    .order('cook_time', { ascending: true });
-  if (error) { console.warn('[searchService] getQuickRecipes:', error.message); return []; }
-  return (data ?? []).map((r) => mapDbToRecipe(toDbRecipeRow(r)));
+  return getCachedOrFetch(`search:quick:${limit}`, CACHE_TTL.homeSection, async () => {
+    const { data, error } = await base()
+      .lte('cook_time', 20)
+      .limit(limit)
+      .order('cook_time', { ascending: true });
+    if (error) { console.warn('[searchService] getQuickRecipes:', error.message); return []; }
+    return (data ?? []).map((r) => mapDbToRecipe(toDbRecipeRow(r)));
+  });
 }
 
 /** Low-calorie recipes. Uses idx_recipes_calories partial index. */
 export async function getLowCalorieRecipes(maxCal = 300, limit = 8): Promise<Recipe[]> {
-  const { data, error } = await base()
-    .lte('calories', maxCal)
-    .limit(limit)
-    .order('calories', { ascending: true });
-  if (error) { console.warn('[searchService] getLowCalorieRecipes:', error.message); return []; }
-  return (data ?? []).map((r) => mapDbToRecipe(toDbRecipeRow(r)));
+  return getCachedOrFetch(`search:low-cal:${maxCal}:${limit}`, CACHE_TTL.homeSection, async () => {
+    const { data, error } = await base()
+      .lte('calories', maxCal)
+      .limit(limit)
+      .order('calories', { ascending: true });
+    if (error) { console.warn('[searchService] getLowCalorieRecipes:', error.message); return []; }
+    return (data ?? []).map((r) => mapDbToRecipe(toDbRecipeRow(r)));
+  });
 }
 
 /** High-protein recipes. Uses idx_recipes_calories partial index. */
 export async function getHighProteinRecipes(minProtein = 20, limit = 8): Promise<Recipe[]> {
-  const { data, error } = await base()
-    .gte('protein_g', minProtein)
-    .limit(limit)
-    .order('protein_g', { ascending: false });
-  if (error) { console.warn('[searchService] getHighProteinRecipes:', error.message); return []; }
-  return (data ?? []).map((r) => mapDbToRecipe(toDbRecipeRow(r)));
+  return getCachedOrFetch(`search:high-protein:${minProtein}:${limit}`, CACHE_TTL.homeSection, async () => {
+    const { data, error } = await base()
+      .gte('protein_g', minProtein)
+      .limit(limit)
+      .order('protein_g', { ascending: false });
+    if (error) { console.warn('[searchService] getHighProteinRecipes:', error.message); return []; }
+    return (data ?? []).map((r) => mapDbToRecipe(toDbRecipeRow(r)));
+  });
 }
 
 /** Recipes by cuisine. Uses idx_recipes_cuisine partial index. */
@@ -200,17 +227,13 @@ export async function getRecipesByCuisine(cuisine: string, limit = 50): Promise<
 
 /** Total count of public non-deleted recipes. */
 export async function getRecipeCount(): Promise<number> {
-  const { count, error } = await supabase
-    .from('master_recipes')
-    .select('*', { count: 'exact', head: true })
-    .is('deleted_at', null)
-    .eq('is_public', true);
-  if (error) return 0;
-  return count ?? 0;
+  return getTotalRecipeCount();
 }
 
 /** Fetch a single recipe by UUID with full columns. */
 export async function getRecipeByIdFromDb(id: string): Promise<Recipe | null> {
+  const key = `search:recipe:master:${id.trim()}`;
+  return getCachedOrFetch(key, CACHE_TTL.recipeDetail, async () => {
   const ref = id.trim();
 
   if (isUuidLike(ref)) {
@@ -235,23 +258,26 @@ export async function getRecipeByIdFromDb(id: string): Promise<Recipe | null> {
 
   if (bySlug.error || !bySlug.data) return null;
   return mapDbToRecipe(toDbRecipeRow(bySlug.data));
+  });
 }
 
 export async function getAIRecipeByIdFromDb(id: string): Promise<Recipe | null> {
-  const { data, error } = await supabase
-    .from('user_ai_generated_recipes')
-    .select(
-      'id,title,description,cuisine,diet,difficulty,cook_time,prep_time,servings,calories,' +
-      'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps'
-    )
-    .eq('id', id)
-    .single();
+  return getCachedOrFetch(`search:recipe:ai:${id}`, CACHE_TTL.recipeDetail, async () => {
+    const { data, error } = await supabase
+      .from('user_ai_generated_recipes')
+      .select(
+        'id,title,description,cuisine,diet,difficulty,cook_time,prep_time,servings,calories,' +
+        'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps'
+      )
+      .eq('id', id)
+      .single();
 
-  if (error || !data) return null;
+    if (error || !data) return null;
 
-  return mapDbToRecipe({
-    ...toDbRecipeRow(data),
-    source: 'ai',
+    return mapDbToRecipe({
+      ...toDbRecipeRow(data),
+      source: 'ai',
+    });
   });
 }
 
@@ -289,6 +315,18 @@ export async function getPersonalizedRecipes(
   limit = 12,
 ): Promise<Recipe[]> {
   if (!profile) return getFeaturedRecipes(limit);
+
+  const cacheKey = [
+    'search:personalized',
+    profile.id,
+    profile.healthProfile?.fitnessGoal ?? 'none',
+    profile.cookingLevel,
+    [...(profile.dietPreferences ?? [])].sort().join('|'),
+    [...(profile.favoriteCuisines ?? [])].sort().join('|'),
+    limit,
+  ].join(':');
+
+  return getCachedOrFetch(cacheKey, CACHE_TTL.personalized, async () => {
 
   let q = base().limit(limit * 3);
 
@@ -329,6 +367,7 @@ export async function getPersonalizedRecipes(
   }
 
   return recipes.slice(0, limit);
+  });
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -394,6 +433,17 @@ export async function searchRecipesByIngredients(
     new Set((await canonicalizeIngredients(ingredients)).map(normalizeIngredientToken).filter(Boolean))
   );
   if (canonicalIngredients.length === 0) return [];
+
+  const cacheKey = [
+    'search:ingredients',
+    canonicalIngredients.sort().join('|'),
+    options?.diet ?? '',
+    options?.cuisine ?? '',
+    typeof options?.maxTime === 'number' ? options.maxTime : '',
+    typeof options?.limit === 'number' ? options.limit : '',
+  ].join(':');
+
+  return getCachedOrFetch(cacheKey, 1000 * 60 * 6, async () => {
 
   let masterQuery = supabase
     .from('master_recipes')
@@ -530,4 +580,5 @@ export async function searchRecipesByIngredients(
   });
 
   return out.slice(0, options?.limit ?? 20);
+  });
 }

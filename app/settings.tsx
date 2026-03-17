@@ -123,7 +123,11 @@ export default function SettingsScreen() {
         <View style={[styles.section, { backgroundColor: colors.surface }]}>
           <SettingRow icon="person-outline" label="Edit Profile" onPress={() => router.push('/edit-profile' as any)} />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <SettingRow icon="lock-closed-outline" label="Change Password" onPress={() => {}} />
+          <SettingRow icon="at-outline" label="Change Username" onPress={() => router.push('/change-username' as any)} />
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          <SettingRow icon="mail-outline" label="Change Email" onPress={() => router.push('/change-email' as any)} />
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          <SettingRow icon="lock-closed-outline" label="Change Password" onPress={() => router.push('/change-password' as any)} />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <SettingRow icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => router.push('/privacy' as any)} />
         </View>

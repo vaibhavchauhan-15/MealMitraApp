@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MealEntry, DayOfWeek, MealType, RecipeSource } from '../types';
 import { supabase } from '../services/supabase';
 
+const PLANNER_SYNC_TTL_MS = 1000 * 45;
+
 // ─── Date helpers (DayOfWeek ↔ DATE) ─────────────────────────────────────────
 
 const DAYS: DayOfWeek[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -42,10 +44,87 @@ async function getUid(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
+async function upsertPlannerMealRemote(payload: {
+  user_id: string;
+  entry_id: string;
+  day: string;
+  meal_type: MealType;
+  recipe_id: string;
+  recipe_source: RecipeSource;
+  servings: number;
+}): Promise<boolean> {
+  const first = await supabase
+    .from('planner_meals')
+    .upsert(payload, { onConflict: 'user_id,entry_id' });
+
+  if (!first.error) return true;
+
+  // One lightweight retry helps on flaky mobile networks.
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  const second = await supabase
+    .from('planner_meals')
+    .upsert(payload, { onConflict: 'user_id,entry_id' });
+
+  if (second.error) {
+    console.warn('[PlannerStore] addMeal:', second.error.message);
+    return false;
+  }
+
+  return true;
+}
+
+async function deletePlannerMealRemote(uid: string, entryId: string): Promise<boolean> {
+  const first = await supabase
+    .from('planner_meals')
+    .delete()
+    .eq('user_id', uid)
+    .eq('entry_id', entryId);
+
+  if (!first.error) return true;
+
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  const second = await supabase
+    .from('planner_meals')
+    .delete()
+    .eq('user_id', uid)
+    .eq('entry_id', entryId);
+
+  if (second.error) {
+    console.warn('[PlannerStore] removeMeal:', second.error.message);
+    return false;
+  }
+
+  return true;
+}
+
+async function clearPlannerMealsRemote(uid: string): Promise<boolean> {
+  const first = await supabase
+    .from('planner_meals')
+    .delete()
+    .eq('user_id', uid);
+
+  if (!first.error) return true;
+
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  const second = await supabase
+    .from('planner_meals')
+    .delete()
+    .eq('user_id', uid);
+
+  if (second.error) {
+    console.warn('[PlannerStore] clearWeek:', second.error.message);
+    return false;
+  }
+
+  return true;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PlannerState {
   meals: MealEntry[];
+  syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
+  lastSyncedAt: number | null;
   addMeal: (
     day: DayOfWeek,
     mealType: MealType,
@@ -58,24 +137,32 @@ interface PlannerState {
   clearWeek: () => void;
   getAllRecipeIds: () => string[];
   /** Call once on app start (after auth) to pull server state into local store. */
-  syncFromSupabase: () => Promise<void>;
+  syncFromSupabase: (options?: { force?: boolean }) => Promise<void>;
 }
 
 export const usePlannerStore = create<PlannerState>()(
   persist(
     (set, get) => ({
       meals: [],
+      syncStatus: 'idle',
+      lastSyncedAt: null,
 
       addMeal: (day, mealType, recipeId, servings = 2, recipeSource = 'master') => {
-        const entryId = `${day}-${mealType}-${recipeId}-${Date.now()}`;
+        const entryId = `${day}-${mealType}`;
         const newEntry: MealEntry = { id: entryId, day, mealType, recipeId, recipeSource, servings };
-        // Optimistic local update
-        set((s) => ({ meals: [...s.meals, newEntry] }));
+        // Keep one recipe per day+meal slot for a cleaner planner UI.
+        set((s) => ({
+          meals: [
+            ...s.meals.filter((m) => !(m.day === day && m.mealType === mealType)),
+            newEntry,
+          ],
+        }));
+
         // Background Supabase sync — day is stored as actual DATE (v3 schema)
         getUid().then((uid) => {
           if (!uid) return;
-          supabase.from('planner_meals').upsert(
-            {
+          set({ syncStatus: 'syncing' });
+          upsertPlannerMealRemote({
               user_id: uid,
               entry_id: entryId,
               day: dayToDate(day),   // DayOfWeek → YYYY-MM-DD
@@ -83,10 +170,8 @@ export const usePlannerStore = create<PlannerState>()(
               recipe_id: recipeId,
               recipe_source: recipeSource,
               servings,
-            },
-            { onConflict: 'user_id,entry_id' }
-          ).then(({ error }) => {
-            if (error) console.warn('[PlannerStore] addMeal:', error.message);
+          }).then((ok) => {
+            set({ syncStatus: ok ? 'synced' : 'error', lastSyncedAt: ok ? Date.now() : get().lastSyncedAt });
           });
         });
       },
@@ -95,13 +180,10 @@ export const usePlannerStore = create<PlannerState>()(
         set((s) => ({ meals: s.meals.filter((m) => m.id !== id) }));
         getUid().then((uid) => {
           if (!uid) return;
-          supabase.from('planner_meals')
-            .delete()
-            .eq('user_id', uid)
-            .eq('entry_id', id)
-            .then(({ error }) => {
-              if (error) console.warn('[PlannerStore] removeMeal:', error.message);
-            });
+          set({ syncStatus: 'syncing' });
+          deletePlannerMealRemote(uid, id).then((ok) => {
+            set({ syncStatus: ok ? 'synced' : 'error', lastSyncedAt: ok ? Date.now() : get().lastSyncedAt });
+          });
         });
       },
 
@@ -111,20 +193,28 @@ export const usePlannerStore = create<PlannerState>()(
         set({ meals: [] });
         getUid().then((uid) => {
           if (!uid) return;
-          supabase.from('planner_meals')
-            .delete()
-            .eq('user_id', uid)
-            .then(({ error }) => {
-              if (error) console.warn('[PlannerStore] clearWeek:', error.message);
-            });
+          set({ syncStatus: 'syncing' });
+          clearPlannerMealsRemote(uid).then((ok) => {
+            set({ syncStatus: ok ? 'synced' : 'error', lastSyncedAt: ok ? Date.now() : get().lastSyncedAt });
+          });
         });
       },
 
       getAllRecipeIds: () => [...new Set(get().meals.map((m) => m.recipeId))],
 
-      syncFromSupabase: async () => {
+      syncFromSupabase: async (options) => {
+        const force = options?.force ?? false;
+        const last = get().lastSyncedAt;
+        if (!force && last && Date.now() - last < PLANNER_SYNC_TTL_MS) {
+          return;
+        }
+
+        set({ syncStatus: 'syncing' });
         const uid = await getUid();
-        if (!uid) return;
+        if (!uid) {
+          set({ syncStatus: 'idle' });
+          return;
+        }
         // Only fetch meals for the current ISO week to avoid merging stale weeks
         const weekStart = dayToDate('Mon');
         const weekEnd   = dayToDate('Sun');
@@ -134,7 +224,11 @@ export const usePlannerStore = create<PlannerState>()(
           .eq('user_id', uid)
           .gte('day', weekStart)
           .lte('day', weekEnd);
-        if (error) { console.warn('[PlannerStore] sync:', error.message); return; }
+        if (error) {
+          console.warn('[PlannerStore] sync:', error.message);
+          set({ syncStatus: 'error' });
+          return;
+        }
         const meals: MealEntry[] = (data ?? []).map((row: any) => ({
           id: row.entry_id,
           day: dateToDay(row.day),          // DATE → DayOfWeek
@@ -143,7 +237,13 @@ export const usePlannerStore = create<PlannerState>()(
           recipeSource: (row.recipe_source as RecipeSource | null) ?? 'master',
           servings: row.servings,
         }));
-        set({ meals });
+
+        // Normalize legacy duplicates: keep only one meal per day+meal slot.
+        const bySlot = new Map<string, MealEntry>();
+        meals.forEach((meal) => {
+          bySlot.set(`${meal.day}-${meal.mealType}`, meal);
+        });
+        set({ meals: Array.from(bySlot.values()), syncStatus: 'synced', lastSyncedAt: Date.now() });
       },
     }),
     {

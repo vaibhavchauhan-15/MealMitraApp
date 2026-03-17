@@ -22,6 +22,7 @@ import {
   canonicalizeIngredients,
   searchRecipesByIngredients,
   IngredientMatchResult,
+  invalidateRecipeQueryCaches,
 } from '../src/services/searchService';
 import {
   generateRecipesFromIngredients,
@@ -245,6 +246,8 @@ async function saveAIRecipeToSupabase(
       console.warn('[AIAssistant] saveAIRecipe:', error.message);
       return null;
     }
+
+    void invalidateRecipeQueryCaches();
 
     return (data as string | null) ?? null;
   } catch (error) {
@@ -581,7 +584,7 @@ function AIRecipeCard({
         <View style={styles.cardActionRowCompact}>
           <ScalePressable
             onPress={onUpload}
-            style={[styles.outlineAction, isUploaded && styles.outlineActionActive]}
+            style={[styles.outlineAction, styles.compactActionHalf, isUploaded && styles.outlineActionActive]}
             pressedScale={0.96}
           >
             <Ionicons
@@ -596,7 +599,7 @@ function AIRecipeCard({
 
           <ScalePressable
             onPress={onSave}
-            style={[styles.outlineAction, isSavedRecipe && styles.outlineActionActive]}
+            style={[styles.outlineAction, styles.compactActionHalf, isSavedRecipe && styles.outlineActionActive]}
             pressedScale={0.96}
           >
             <Ionicons
@@ -609,7 +612,11 @@ function AIRecipeCard({
             </Text>
           </ScalePressable>
 
-          <ScalePressable onPress={onPlanPress} style={styles.primaryAction} pressedScale={0.96}>
+          <ScalePressable
+            onPress={onPlanPress}
+            style={[styles.primaryAction, styles.compactActionFull]}
+            pressedScale={0.96}
+          >
             <Ionicons name="calendar-outline" size={14} color="#fff" />
             <Text style={styles.primaryActionText}>Plan</Text>
           </ScalePressable>
@@ -841,6 +848,7 @@ export default function AIAssistantScreen() {
         return;
       }
 
+      void invalidateRecipeQueryCaches();
       setUploadedRecipeIds((previous) => (previous.includes(recipe.id) ? previous : [...previous, recipe.id]));
       showToast('Recipe uploaded to public');
     },
@@ -860,9 +868,11 @@ export default function AIAssistantScreen() {
 
   const isLoading = phase === 'searching' || phase === 'generating_ai';
   const showResults = phase === 'db_results' || phase === 'ai_results';
+  const showIngredientComposer = phase === 'idle' || phase === 'error';
   const hasStateToReset = chips.length > 0 || inputText.trim().length > 0 || showResults;
   const canSearch = (chips.length > 0 || inputText.trim().length > 0) && !isLoading;
-  const showEmptyState = phase === 'idle' && chips.length === 0 && inputText.trim().length === 0;
+  const showEmptyState =
+    showIngredientComposer && phase === 'idle' && chips.length === 0 && inputText.trim().length === 0;
 
   return (
     <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -894,127 +904,129 @@ export default function AIAssistantScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 28 }]}
         >
-          <View style={styles.inputCard}>
-            <View style={styles.inputHeadingBlock}>
-              <Text style={styles.inputTitle}>Add Ingredients</Text>
-              <Text style={styles.inputCaption}>Add items you have in your kitchen</Text>
-            </View>
-
-            <View style={styles.tipRow}>
-              <Ionicons name="sparkles-outline" size={13} color={palette.orange} />
-              <Text style={styles.tipText}>Tip: Add 2-5 ingredients for best AI results</Text>
-            </View>
-
-            <View style={styles.inputShell}>
-              <Ionicons name="add-circle-outline" size={20} color={palette.textMuted} />
-              <TextInput
-                ref={inputRef}
-                style={styles.textInput}
-                placeholder="Add ingredient (tomato, egg...)"
-                placeholderTextColor={palette.textMuted}
-                value={inputText}
-                onChangeText={handleInputChange}
-                onSubmitEditing={commitCurrentInput}
-                returnKeyType="done"
-                editable={!isLoading}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              {inputText.trim().length > 0 && (
-                <ScalePressable onPress={commitCurrentInput} style={styles.inlineAddBtn} pressedScale={0.95}>
-                  <Text style={styles.inlineAddBtnText}>Add</Text>
-                </ScalePressable>
-              )}
-            </View>
-
-            <View style={styles.sectionMiniHeader}>
-              <Text style={styles.sectionMiniTitle}>Selected ({chips.length})</Text>
-            </View>
-
-            {chips.length > 0 ? (
-              <View style={styles.chipWrap}>
-                {chips.map((chip) => (
-                  <ScalePressable
-                    key={chip}
-                    onPress={() => removeChip(chip)}
-                    style={styles.chip}
-                    pressedScale={0.96}
-                  >
-                    <Text style={styles.chipText}>{chip}</Text>
-                    <Ionicons name="close" size={13} color={palette.orangeSoft} />
-                  </ScalePressable>
-                ))}
+          {showIngredientComposer && (
+            <View style={styles.inputCard}>
+              <View style={styles.inputHeadingBlock}>
+                <Text style={styles.inputTitle}>Add Ingredients</Text>
+                <Text style={styles.inputCaption}>Add items you have in your kitchen</Text>
               </View>
-            ) : (
-              <Text style={styles.sectionEmptyText}>No ingredients selected yet</Text>
-            )}
 
-            {recentIngredientChips.length > 0 && normalizedInput.length === 0 && (
-              <>
-                <View style={styles.sectionMiniHeader}>
-                  <Text style={styles.sectionMiniTitle}>Recent</Text>
-                </View>
-                <View style={styles.suggestionsWrap}>
-                  {recentIngredientChips.map((ingredient) => (
+              <View style={styles.tipRow}>
+                <Ionicons name="sparkles-outline" size={13} color={palette.orange} />
+                <Text style={styles.tipText}>Tip: Add 2-5 ingredients for best AI results</Text>
+              </View>
+
+              <View style={styles.inputShell}>
+                <Ionicons name="add-circle-outline" size={20} color={palette.textMuted} />
+                <TextInput
+                  ref={inputRef}
+                  style={styles.textInput}
+                  placeholder="Add ingredient (tomato, egg...)"
+                  placeholderTextColor={palette.textMuted}
+                  value={inputText}
+                  onChangeText={handleInputChange}
+                  onSubmitEditing={commitCurrentInput}
+                  returnKeyType="done"
+                  editable={!isLoading}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {inputText.trim().length > 0 && (
+                  <ScalePressable onPress={commitCurrentInput} style={styles.inlineAddBtn} pressedScale={0.95}>
+                    <Text style={styles.inlineAddBtnText}>Add</Text>
+                  </ScalePressable>
+                )}
+              </View>
+
+              <View style={styles.sectionMiniHeader}>
+                <Text style={styles.sectionMiniTitle}>Selected ({chips.length})</Text>
+              </View>
+
+              {chips.length > 0 ? (
+                <View style={styles.chipWrap}>
+                  {chips.map((chip) => (
                     <ScalePressable
-                      key={`recent-${ingredient}`}
-                      onPress={() => addChipValue(ingredient)}
-                      style={styles.recentChip}
+                      key={chip}
+                      onPress={() => removeChip(chip)}
+                      style={styles.chip}
                       pressedScale={0.96}
                     >
-                      <Ionicons name="time-outline" size={12} color={palette.textSecondary} />
-                      <Text style={styles.recentChipText}>{ingredient}</Text>
+                      <Text style={styles.chipText}>{chip}</Text>
+                      <Ionicons name="close" size={13} color={palette.orangeSoft} />
                     </ScalePressable>
                   ))}
                 </View>
-              </>
-            )}
-
-            <View style={styles.sectionMiniHeader}>
-              <Text style={styles.sectionMiniTitle}>Suggestions</Text>
-            </View>
-            <View style={styles.suggestionsWrap}>
-              {suggestedIngredients.map((ingredient) => (
-                <ScalePressable
-                  key={ingredient}
-                  onPress={() => {
-                    addChipValue(ingredient);
-                    setInputText('');
-                  }}
-                  style={styles.suggestionChip}
-                  pressedScale={0.96}
-                >
-                  <Ionicons name="add" size={14} color={palette.textSecondary} />
-                  <Text style={styles.suggestionChipText}>{ingredient}</Text>
-                </ScalePressable>
-              ))}
-            </View>
-
-            <ScalePressable onPress={handleSearch} disabled={!canSearch} style={styles.searchBtn} pressedScale={0.96}>
-              {canSearch ? (
-                <LinearGradient
-                  colors={[palette.orange, palette.orangeGradientEnd]}
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={styles.searchGradient}
-                >
-                  {isLoading ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <>
-                      <Ionicons name="search-outline" size={21} color="#fff" />
-                      <Text style={styles.searchBtnText}>Find Recipes</Text>
-                    </>
-                  )}
-                </LinearGradient>
               ) : (
-                <View style={[styles.searchGradient, styles.searchDisabled]}>
-                  <Ionicons name="search-outline" size={21} color={palette.textMuted} />
-                  <Text style={[styles.searchBtnText, styles.searchBtnTextDisabled]}>Find Recipes</Text>
-                </View>
+                <Text style={styles.sectionEmptyText}>No ingredients selected yet</Text>
               )}
-            </ScalePressable>
-          </View>
+
+              {recentIngredientChips.length > 0 && normalizedInput.length === 0 && (
+                <>
+                  <View style={styles.sectionMiniHeader}>
+                    <Text style={styles.sectionMiniTitle}>Recent</Text>
+                  </View>
+                  <View style={styles.suggestionsWrap}>
+                    {recentIngredientChips.map((ingredient) => (
+                      <ScalePressable
+                        key={`recent-${ingredient}`}
+                        onPress={() => addChipValue(ingredient)}
+                        style={styles.recentChip}
+                        pressedScale={0.96}
+                      >
+                        <Ionicons name="time-outline" size={12} color={palette.textSecondary} />
+                        <Text style={styles.recentChipText}>{ingredient}</Text>
+                      </ScalePressable>
+                    ))}
+                  </View>
+                </>
+              )}
+
+              <View style={styles.sectionMiniHeader}>
+                <Text style={styles.sectionMiniTitle}>Suggestions</Text>
+              </View>
+              <View style={styles.suggestionsWrap}>
+                {suggestedIngredients.map((ingredient) => (
+                  <ScalePressable
+                    key={ingredient}
+                    onPress={() => {
+                      addChipValue(ingredient);
+                      setInputText('');
+                    }}
+                    style={styles.suggestionChip}
+                    pressedScale={0.96}
+                  >
+                    <Ionicons name="add" size={14} color={palette.textSecondary} />
+                    <Text style={styles.suggestionChipText}>{ingredient}</Text>
+                  </ScalePressable>
+                ))}
+              </View>
+
+              <ScalePressable onPress={handleSearch} disabled={!canSearch} style={styles.searchBtn} pressedScale={0.96}>
+                {canSearch ? (
+                  <LinearGradient
+                    colors={[palette.orange, palette.orangeGradientEnd]}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    style={styles.searchGradient}
+                  >
+                    {isLoading ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="search-outline" size={21} color="#fff" />
+                        <Text style={styles.searchBtnText}>Find Recipes</Text>
+                      </>
+                    )}
+                  </LinearGradient>
+                ) : (
+                  <View style={[styles.searchGradient, styles.searchDisabled]}>
+                    <Ionicons name="search-outline" size={21} color={palette.textMuted} />
+                    <Text style={[styles.searchBtnText, styles.searchBtnTextDisabled]}>Find Recipes</Text>
+                  </View>
+                )}
+              </ScalePressable>
+            </View>
+          )}
 
           {showEmptyState && (
             <View style={styles.emptyStateBox}>
@@ -1659,6 +1671,17 @@ function createStyles(palette: Palette) {
       flexDirection: 'row',
       gap: 10,
       flexWrap: 'wrap',
+      width: '100%',
+    },
+    compactActionHalf: {
+      flexBasis: '48%',
+      flexGrow: 1,
+      minWidth: 0,
+      paddingHorizontal: 10,
+    },
+    compactActionFull: {
+      width: '100%',
+      minWidth: 0,
     },
     outlineAction: {
       minWidth: 90,
@@ -1840,16 +1863,16 @@ function createStyles(palette: Palette) {
       fontSize: 11,
     },
     aiFooterRow: {
-      marginTop: 2,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
+      marginTop: 8,
+      flexDirection: 'column',
+      alignItems: 'stretch',
       gap: 10,
     },
     expandLink: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
+      alignSelf: 'flex-start',
     },
     expandLinkText: {
       color: palette.orange,

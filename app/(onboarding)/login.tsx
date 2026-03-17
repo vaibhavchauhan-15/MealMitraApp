@@ -21,6 +21,7 @@ import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { useUserStore } from '../../src/store/userStore';
 import { supabase } from '../../src/services/supabase';
+import { shouldForceProfileSetup } from '../../src/utils/profileCompletion';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as Linking from 'expo-linking';
@@ -30,9 +31,9 @@ export default function LoginScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { setProfile, setHasOnboarded } = useUserStore();
+  const { setProfile, setHasOnboarded, hydrateFromAuthUser } = useUserStore();
 
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -142,15 +143,12 @@ export default function LoginScreen() {
       }
 
       if (user) {
-        setProfile({
-          id: user.id,
-          name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email?.split('@')[0] ?? 'User',
-          email: user.email ?? '',
-          avatar: user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? undefined,
-          favoriteCuisines: [],
-          cookingLevel: 'Intermediate',
-        });
-        setHasOnboarded(true);
+        await hydrateFromAuthUser(user);
+        const hydratedProfile = useUserStore.getState().profile;
+        if (shouldForceProfileSetup(hydratedProfile)) {
+          router.replace('/(onboarding)/profile-setup' as any);
+          return;
+        }
         router.replace('/(tabs)' as any);
       } else {
         setGoogleLoading(false);
@@ -162,13 +160,24 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      showToast('Please enter your email and password.', 'error', 'Error');
+    if (!identifier.trim() || !password.trim()) {
+      showToast('Please enter your username/email and password.', 'error', 'Error');
       return;
     }
+
     setLoading(true);
+    const { data: resolvedEmail, error: resolveError } = await supabase.rpc('resolve_login_email', {
+      p_identifier: identifier.trim(),
+    });
+
+    if (resolveError || !resolvedEmail) {
+      setLoading(false);
+      showToast('Invalid username/email or password.', 'error', 'Sign In Failed');
+      return;
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: String(resolvedEmail).trim().toLowerCase(),
       password: password.trim(),
     });
     setLoading(false);
@@ -177,15 +186,12 @@ export default function LoginScreen() {
       return;
     }
     const user = data.user;
-    setProfile({
-      id: user.id,
-      name: user.user_metadata?.name ?? user.email?.split('@')[0] ?? 'User',
-      email: user.email ?? '',
-      avatar: user.user_metadata?.avatar_url ?? undefined,
-      favoriteCuisines: [],
-      cookingLevel: 'Intermediate',
-    });
-    setHasOnboarded(true);
+    await hydrateFromAuthUser(user);
+    const hydratedProfile = useUserStore.getState().profile;
+    if (shouldForceProfileSetup(hydratedProfile)) {
+      router.replace('/(onboarding)/profile-setup' as any);
+      return;
+    }
     router.replace('/(tabs)' as any);
   };
 
@@ -221,11 +227,10 @@ export default function LoginScreen() {
           <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground }]}>
             <TextInput
               style={[styles.input, { color: colors.text }]}
-              placeholder="Email address"
+              placeholder="Username or email"
               placeholderTextColor={colors.textTertiary}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
+              value={identifier}
+              onChangeText={setIdentifier}
               autoCapitalize="none"
             />
           </View>

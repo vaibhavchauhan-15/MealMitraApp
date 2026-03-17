@@ -15,6 +15,7 @@ import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { useUserStore } from '../../src/store/userStore';
 import { useSavedStore } from '../../src/store/savedStore';
+import { getProfileIconById } from '../../src/constants/profileIcons';
 
 type MenuItem = { icon: string; label: string; badge?: number; onPress: () => void };
 
@@ -26,12 +27,12 @@ export default function ProfileScreen() {
   const logout = useUserStore((s) => s.logout);
   const setHasOnboarded = useUserStore((s) => s.setHasOnboarded);
   const savedCount = useSavedStore((s) => s.savedIds.length);
+  const avatarIcon = getProfileIconById(profile?.avatarIcon);
+  const hasCompletedProfile = Boolean(profile?.profileCompletedAt);
 
   const libraryMenu: MenuItem[] = [
     { icon: 'bookmark-outline', label: 'Saved Recipes', badge: savedCount || undefined, onPress: () => router.push('/(tabs)/saved' as any) },
     { icon: 'time-outline', label: 'Recently Viewed', onPress: () => router.push('/recently-viewed' as any) },
-    { icon: 'restaurant-outline', label: 'My Recipes', onPress: () => router.push('/my-recipes' as any) },
-    { icon: 'cloud-upload-outline', label: 'Upload Recipe', onPress: () => router.push('/upload-recipe' as any) },
   ];
 
   const appMenu: MenuItem[] = [
@@ -98,6 +99,8 @@ export default function ProfileScreen() {
             <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
               {profile?.avatar ? (
                 <Image source={{ uri: profile.avatar }} style={styles.avatarImg} />
+              ) : avatarIcon ? (
+                <Ionicons name={avatarIcon.icon} size={34} color="#FFF" />
               ) : (
                 <Text style={styles.avatarLetter}>
                   {profile?.name ? profile.name[0].toUpperCase() : '👤'}
@@ -116,6 +119,9 @@ export default function ProfileScreen() {
           <Text style={[styles.heroName, { color: colors.text }]}>
             {profile?.name || 'Food Enthusiast'}
           </Text>
+          {!!profile?.username && (
+            <Text style={[styles.heroUsername, { color: colors.accent }]}>@{profile.username}</Text>
+          )}
           <Text style={[styles.heroEmail, { color: colors.textSecondary }]}>
             {profile?.email || 'Tap the pencil to set up your profile'}
           </Text>
@@ -158,14 +164,14 @@ export default function ProfileScreen() {
         </View>
 
         {/* ── Health snapshot / nudge ──────────────────────────────────────── */}
-        {profile?.healthProfile?.tdee ? (
+        {hasCompletedProfile ? (
           <View style={[styles.healthCard, { backgroundColor: colors.surface }]}>
             <Text style={[styles.healthTitle, { color: colors.textSecondary }]}>HEALTH STATS</Text>
             <View style={styles.healthRow}>
               {[
-                { label: 'TDEE', value: `${profile.healthProfile.tdee}`, unit: 'kcal', color: colors.accent },
-                { label: 'Weight', value: `${profile.healthProfile.weight ?? '—'}`, unit: 'kg', color: '#22C55E' },
-                { label: 'Goal', value: (profile.healthProfile.fitnessGoal ?? '—').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), unit: '', color: '#F59E0B' },
+                { label: 'TDEE', value: `${profile?.healthProfile?.tdee ?? '—'}`, unit: 'kcal', color: colors.accent },
+                { label: 'Weight', value: `${profile?.healthProfile?.weight ?? '—'}`, unit: 'kg', color: '#22C55E' },
+                { label: 'Goal', value: (profile?.healthProfile?.fitnessGoal ?? '—').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), unit: '', color: '#F59E0B' },
               ].map((item, i, arr) => (
                 <React.Fragment key={item.label}>
                   <View style={styles.healthItem}>
@@ -197,6 +203,29 @@ export default function ProfileScreen() {
             <Ionicons name="arrow-forward" size={18} color="#FFF" />
           </TouchableOpacity>
         )}
+
+        {/* ── My Recipes quick actions ─────────────────────────────────── */}
+        <View style={styles.group}>
+          <Text style={[styles.groupLabel, { color: colors.textSecondary }]}>MY RECIPES</Text>
+          <View style={[styles.recipeActionsCard, { backgroundColor: colors.surface }]}>
+            <TouchableOpacity
+              style={[styles.recipeActionBtn, { backgroundColor: colors.accentLight }]}
+              onPress={() => router.push('/my-recipes' as any)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="restaurant-outline" size={18} color={colors.accent} />
+              <Text style={[styles.recipeActionText, { color: colors.accent }]}>View My Recipes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.recipeActionBtn, { backgroundColor: colors.accent }]}
+              onPress={() => router.push('/upload-recipe' as any)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="cloud-upload-outline" size={18} color="#FFF" />
+              <Text style={[styles.recipeActionText, { color: '#FFF' }]}>Upload Recipe</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* ── Menu groups ─────────────────────────────────────────────────── */}
         <MenuGroup title="MY LIBRARY" items={libraryMenu} />
@@ -267,6 +296,7 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: '#FFF',
   },
   heroName: { fontSize: Typography.fontSize['2xl'], fontWeight: '800', marginTop: 4 },
+  heroUsername: { fontSize: Typography.fontSize.sm, fontWeight: '700' },
   heroEmail: { fontSize: Typography.fontSize.sm, marginBottom: 4 },
 
   chipsRow: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 2 },
@@ -328,6 +358,23 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   groupCard: { borderRadius: BorderRadius.xl, overflow: 'hidden' },
+  recipeActionsCard: {
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  recipeActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: 12,
+    borderRadius: BorderRadius.lg,
+  },
+  recipeActionText: {
+    fontSize: Typography.fontSize.base,
+    fontWeight: '700',
+  },
   menuRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 14, paddingHorizontal: Spacing.base,

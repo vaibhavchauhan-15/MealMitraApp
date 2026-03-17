@@ -145,5 +145,16 @@ export const Shadow = {
   },
 };
 
+export const Motion = {
+  // Centralized stagger controls for lightweight list/card entry animations.
+  STAGGER_DURATION_MS: 170,
+  STAGGER_BASE_MS: 14,
+  STAGGER_GROUP_MS: 18,
+  STAGGER_MAX_ITEMS: 8,
+  STAGGER_TRANSLATE_Y: 6,
+  TRANSITION_SHORT_MS: 180,
+  TRANSITION_MEDIUM_MS: 190,
+};
+
 export type ColorScheme = 'light' | 'dark';
 export type ThemeColors = typeof Colors.light;

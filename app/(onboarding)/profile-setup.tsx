@@ -22,6 +22,7 @@ import {
   UserActivityLevel,
   BodyGender,
 } from '../../src/types';
+import { PROFILE_ICON_OPTIONS } from '../../src/constants/profileIcons';
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
@@ -175,6 +176,7 @@ export default function ProfileSetupScreen() {
 
   // Step 0 – cooking preferences
   const [cookingLevel, setCookingLevel] = useState<UserProfile['cookingLevel']>(profile?.cookingLevel ?? 'Beginner');
+  const [avatarIcon, setAvatarIcon] = useState(profile?.avatarIcon ?? PROFILE_ICON_OPTIONS[0].id);
   const [diets, setDiets] = useState<DietOption[]>(
     (profile?.dietPreferences as DietOption[] | undefined)?.length
       ? (profile!.dietPreferences as DietOption[])
@@ -229,7 +231,7 @@ export default function ProfileSetupScreen() {
   };
 
   const handleFinish = () => {
-    updateProfile({ cookingLevel, dietPreferences: diets, favoriteCuisines: favCuisines });
+    updateProfile({ cookingLevel, dietPreferences: diets, favoriteCuisines: favCuisines, avatarIcon });
 
     const age    = parseInt(ageText) || undefined;
     const weight = parseFloat(weightText) || undefined;
@@ -273,6 +275,30 @@ export default function ProfileSetupScreen() {
               {COOKING_LEVELS.map((l) => (
                 <Chip key={l} label={l} selected={cookingLevel === l} onPress={() => setCookingLevel(l)} colors={colors} />
               ))}
+            </View>
+          </View>
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>🧩 Profile Icon</Text>
+            <View style={styles.iconGrid}>
+              {PROFILE_ICON_OPTIONS.map((option) => {
+                const active = avatarIcon === option.id;
+                return (
+                  <TouchableOpacity
+                    key={option.id}
+                    style={[
+                      styles.iconChoice,
+                      {
+                        borderColor: active ? colors.accent : colors.border,
+                        backgroundColor: active ? colors.accentLight : colors.surface,
+                      },
+                    ]}
+                    onPress={() => setAvatarIcon(option.id)}
+                  >
+                    <Ionicons name={option.icon} size={16} color={active ? colors.accent : option.color} />
+                    <Text style={[styles.iconChoiceLabel, { color: colors.textSecondary }]}>{option.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
           <View style={styles.section}>
@@ -579,6 +605,22 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   chipText: { fontWeight: '600', fontSize: Typography.fontSize.sm },
+  iconGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  iconChoice: {
+    width: '22%',
+    minWidth: 62,
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  iconChoiceLabel: { fontSize: 10, fontWeight: '600' },
 
   inputBox: {
     flexDirection: 'row',

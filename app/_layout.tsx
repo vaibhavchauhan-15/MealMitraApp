@@ -9,6 +9,7 @@ import { useUserStore } from '../src/store/userStore';
 import { usePlannerStore } from '../src/store/plannerStore';
 import { useRecipeStore } from '../src/store/recipeStore';
 import { useSavedStore } from '../src/store/savedStore';
+import { shouldForceProfileSetup } from '../src/utils/profileCompletion';
 
 // expo-notifications remote push is not available in Expo Go (SDK 53+).
 // Load the module only when running in a real/dev build.
@@ -19,7 +20,7 @@ export default function RootLayout() {
   const isDark = scheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const router = useRouter();
-  const { setProfile, setHasOnboarded, syncFromSupabase: syncUser } = useUserStore();
+  const { hydrateFromAuthUser, syncFromSupabase: syncUser } = useUserStore();
   const syncPlanner = usePlannerStore((s) => s.syncFromSupabase);
   const loadRecipes = useRecipeStore((s) => s.loadInitialData);
   const syncRecipes = useRecipeStore((s) => s.syncAiRecipesFromSupabase);
@@ -29,13 +30,13 @@ export default function RootLayout() {
 
   // Sync all Supabase-backed stores once on mount (session may already exist)
   useEffect(() => {
-    syncUser();
-    syncPlanner();
+    syncUser({ force: true });
+    syncPlanner({ force: true });
     loadRecipes();
     syncRecipes();
     syncRecentSearches();
     syncRecentlyViewed();
-    syncSaved();
+    syncSaved({ force: true });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -44,9 +45,9 @@ export default function RootLayout() {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        syncPlanner();
-        syncSaved();
-        syncUser();
+        syncPlanner({ force: true });
+        syncSaved({ force: true });
+        syncUser({ force: true });
         syncRecipes();
         syncRecentSearches();
         syncRecentlyViewed();
@@ -145,15 +146,12 @@ export default function RootLayout() {
       }
 
       if (user) {
-        setProfile({
-          id: user.id,
-          name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email?.split('@')[0] ?? 'User',
-          email: user.email ?? '',
-          avatar: user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? undefined,
-          favoriteCuisines: [],
-          cookingLevel: 'Beginner',
-        });
-        setHasOnboarded(true);
+        await hydrateFromAuthUser(user);
+        const hydratedProfile = useUserStore.getState().profile;
+        if (shouldForceProfileSetup(hydratedProfile)) {
+          router.replace('/(onboarding)/profile-setup' as any);
+          return;
+        }
         router.replace('/(tabs)' as any);
       }
     } catch {
@@ -183,6 +181,9 @@ export default function RootLayout() {
       <Stack.Screen name="upload-recipe" />
       <Stack.Screen name="notifications" />
       <Stack.Screen name="settings" />
+      <Stack.Screen name="change-username" />
+      <Stack.Screen name="change-password" />
+      <Stack.Screen name="change-email" />
       <Stack.Screen name="help" />
       <Stack.Screen name="privacy" />
     </Stack>

@@ -5,6 +5,29 @@
 import { supabase } from './supabase';
 import { AIDietPlan, UserFitnessProfile } from './aiDietService';
 import { DayOfWeek, MealType, RecipeSource } from '../types';
+import { getCachedOrFetch, invalidateCache } from '../utils/queryCache';
+
+const PLAN_CACHE_TTL_MS = 1000 * 60 * 5;
+
+function publicPlansKey(options: PublicPlanQueryOptions): string {
+  return [
+    'plans:public',
+    options.offset ?? 0,
+    options.limit ?? 20,
+    options.titleQuery?.trim().toLowerCase() ?? '',
+    options.dietType ?? '',
+    typeof options.maxCalories === 'number' ? options.maxCalories : '',
+  ].join(':');
+}
+
+function uploadedPlansKey(userId: string, options: UserPlanQueryOptions): string {
+  return [
+    'plans:uploaded',
+    userId,
+    options.offset ?? 0,
+    options.limit ?? 16,
+  ].join(':');
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,12 +102,46 @@ export interface PublicPlanPage {
   hasMore: boolean;
 }
 
+export interface UserPlanPage {
+  items: SavedAiDietPlan[];
+  hasMore: boolean;
+}
+
+export interface UserPlanQueryOptions {
+  offset?: number;
+  limit?: number;
+}
+
 export interface AiDietPlanMealSelection {
   day: DayOfWeek;
   mealType: MealType;
   recipeId: string;
   recipeSource?: RecipeSource;
   servings?: number;
+}
+
+export interface MasterRecipeMatchInput {
+  mealNames: string[];
+  dietType: UserFitnessProfile['diet_type'];
+  excludeRecipeIds?: string[];
+}
+
+export interface MasterRecipeBatchMatchRow {
+  meal_name: string;
+  matched_title: string;
+  recipe_id: string;
+  recipe_source: 'master';
+}
+
+const DIET_ALLOWED: Record<UserFitnessProfile['diet_type'], string[]> = {
+  vegetarian: ['Vegetarian', 'Vegan'],
+  vegan: ['Vegan'],
+  eggetarian: ['Eggetarian', 'Vegetarian', 'Vegan'],
+  non_veg: ['Non-Vegetarian', 'Eggetarian', 'Vegetarian', 'Vegan'],
+};
+
+function normalizeTitle(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 const DAYS: DayOfWeek[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -213,6 +270,11 @@ export async function saveAiDietPlan(
     }
   }
 
+  await Promise.all([
+    invalidateCache(`plans:uploaded:${resolvedUserId}:`),
+    invalidateCache('plans:public:'),
+  ]);
+
   return data as SavedAiDietPlan;
 }
 
@@ -229,37 +291,183 @@ export async function getUserAiDietPlans(userId: string): Promise<SavedAiDietPla
   return (data ?? []) as SavedAiDietPlan[];
 }
 
-export async function getPublicAiDietPlansPage(
-  options: PublicPlanQueryOptions = {}
-): Promise<PublicPlanPage> {
+export async function getUploadedUserAiDietPlans(userId: string): Promise<SavedAiDietPlan[]> {
+  const page = await getUploadedUserAiDietPlansPage(userId, { offset: 0, limit: 100 });
+  return page.items;
+}
+
+export async function getUploadedUserAiDietPlansPage(
+  userId: string,
+  options: UserPlanQueryOptions = {}
+): Promise<UserPlanPage> {
   const offset = options.offset ?? 0;
-  const limit = options.limit ?? 20;
-  const upper = offset + limit;
+  const limit = options.limit ?? 16;
+  return getCachedOrFetch(uploadedPlansKey(userId, options), PLAN_CACHE_TTL_MS, async () => {
+    const upper = offset + limit;
 
-  let query = supabase
+    const { data, error } = await supabase
+      .from('diet_plans')
+      .select('*, diet_plan_meals(id, plan_id, recipe_id, recipe_source, day, meal_type, servings, added_at)')
+      .eq('user_id', userId)
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .range(offset, upper);
+
+    if (error) throw error;
+
+    const rows = (data ?? []) as SavedAiDietPlan[];
+    return {
+      items: rows.slice(0, limit),
+      hasMore: rows.length > limit,
+    };
+  });
+}
+
+export async function getUserAiDietPlanById(
+  userId: string,
+  planId: string
+): Promise<SavedAiDietPlan | null> {
+  const { data, error } = await supabase
     .from('diet_plans')
-    .select('id,user_id,title,goal,diet_type,days,total_calories,total_protein,plan_diet_type,plan_calories,created_at,plan_data,user_profiles(name)')
-    .eq('is_public', true)
-    .order('created_at', { ascending: false });
+    .select('*, diet_plan_meals(id, plan_id, recipe_id, recipe_source, day, meal_type, servings, added_at)')
+    .eq('id', planId)
+    .eq('user_id', userId)
+    .maybeSingle();
 
-  if (options.titleQuery && options.titleQuery.trim().length > 0) {
-    query = query.ilike('title', `%${options.titleQuery.trim()}%`);
-  }
-  if (options.dietType) {
-    query = query.eq('plan_diet_type', options.dietType);
-  }
-  if (typeof options.maxCalories === 'number') {
-    query = query.lte('plan_calories', options.maxCalories);
-  }
+  if (error) throw error;
+  return (data ?? null) as SavedAiDietPlan | null;
+}
 
-  const { data, error } = await query.range(offset, upper);
+export async function getUserAiDietPlanMealsPage(
+  userId: string,
+  planId: string,
+  options: UserPlanQueryOptions = {}
+): Promise<{ items: SavedAiDietPlanMeal[]; hasMore: boolean }> {
+  const offset = options.offset ?? 0;
+  const limit = options.limit ?? 24;
+  const { data, error } = await supabase.rpc('get_user_ai_diet_plan_meals_page', {
+    p_user_id: userId,
+    p_plan_id: planId,
+    p_offset: offset,
+    p_limit: limit,
+  });
+
   if (error) throw error;
 
-  const rows = (data ?? []).map(mapPublicPlanRow);
+  const rows = (data ?? []) as SavedAiDietPlanMeal[];
   return {
     items: rows.slice(0, limit),
     hasMore: rows.length > limit,
   };
+}
+
+export async function findMasterRecipeMatchesForMealsBatch(
+  input: MasterRecipeMatchInput
+): Promise<Map<string, Array<{ recipeId: string; recipeSource: 'master' }>>> {
+  const normalizedNames = Array.from(
+    new Set(input.mealNames.map((name) => normalizeTitle(name)).filter(Boolean))
+  );
+  const out = new Map<string, Array<{ recipeId: string; recipeSource: 'master' }>>();
+
+  if (normalizedNames.length === 0) return out;
+
+  const { data, error } = await supabase.rpc('match_master_recipes_for_meals_batch', {
+    p_meal_names: normalizedNames,
+    p_diet_type: input.dietType,
+    p_exclude_recipe_ids: input.excludeRecipeIds ?? [],
+  });
+
+  if (error) throw error;
+
+  ((data ?? []) as MasterRecipeBatchMatchRow[]).forEach((row) => {
+    const key = normalizeTitle(row.meal_name);
+    if (!out.has(key)) out.set(key, []);
+    out.get(key)!.push({
+      recipeId: String(row.recipe_id),
+      recipeSource: 'master',
+    });
+  });
+
+  return out;
+}
+
+export async function findMasterRecipeMatchForMeal(
+  input: MasterRecipeMatchInput
+): Promise<{ recipeId: string; recipeSource: 'master' } | null> {
+  const normalizedNames = Array.from(
+    new Set(input.mealNames.map((name) => normalizeTitle(name)).filter(Boolean))
+  );
+
+  if (normalizedNames.length === 0) return null;
+
+  const allowedDiets = DIET_ALLOWED[input.dietType] ?? DIET_ALLOWED.vegetarian;
+  const excluded = new Set(input.excludeRecipeIds ?? []);
+
+  for (const candidateName of normalizedNames) {
+    const { data, error } = await supabase
+      .from('master_recipes')
+      .select('id,title')
+      .eq('is_public', true)
+      .is('deleted_at', null)
+      .in('diet', allowedDiets)
+      .neq('source', 'ai')
+      // Case-insensitive exact match (without wildcards) = strict 100% title match.
+      .ilike('title', candidateName)
+      .limit(10);
+
+    if (error) {
+      throw error;
+    }
+
+    const exact = (data ?? []).find((row: any) => {
+      const title = normalizeTitle(String(row?.title ?? ''));
+      return title === candidateName && !excluded.has(String(row?.id ?? ''));
+    });
+
+    if (exact?.id) {
+      return {
+        recipeId: String(exact.id),
+        recipeSource: 'master',
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function getPublicAiDietPlansPage(
+  options: PublicPlanQueryOptions = {}
+): Promise<PublicPlanPage> {
+  return getCachedOrFetch(publicPlansKey(options), PLAN_CACHE_TTL_MS, async () => {
+    const offset = options.offset ?? 0;
+    const limit = options.limit ?? 20;
+    const upper = offset + limit;
+
+    let query = supabase
+      .from('diet_plans')
+      .select('id,user_id,title,goal,diet_type,days,total_calories,total_protein,plan_diet_type,plan_calories,created_at,plan_data,user_profiles(name)')
+      .eq('is_public', true)
+      .order('created_at', { ascending: false });
+
+    if (options.titleQuery && options.titleQuery.trim().length > 0) {
+      query = query.ilike('title', `%${options.titleQuery.trim()}%`);
+    }
+    if (options.dietType) {
+      query = query.eq('plan_diet_type', options.dietType);
+    }
+    if (typeof options.maxCalories === 'number') {
+      query = query.lte('plan_calories', options.maxCalories);
+    }
+
+    const { data, error } = await query.range(offset, upper);
+    if (error) throw error;
+
+    const rows = (data ?? []).map(mapPublicPlanRow);
+    return {
+      items: rows.slice(0, limit),
+      hasMore: rows.length > limit,
+    };
+  });
 }
 
 export async function findExactPublicDietPlans(
@@ -297,6 +505,7 @@ export async function uploadAiDietPlan(planId: string): Promise<void> {
     .eq('id', planId);
 
   if (error) throw error;
+  await invalidateCache('plans:public:');
 }
 
 export async function upsertAiDietPlanMeals(
@@ -326,6 +535,7 @@ export async function upsertAiDietPlanMeals(
     .upsert(uniqueMeals, { onConflict: 'plan_id,day,meal_type' });
 
   if (error) throw error;
+  await invalidateCache('plans:uploaded:');
 }
 
 // ─── Delete a plan ────────────────────────────────────────────────────────────
@@ -337,4 +547,8 @@ export async function deleteAiDietPlan(planId: string): Promise<void> {
     .eq('id', planId);
 
   if (error) throw error;
+  await Promise.all([
+    invalidateCache('plans:uploaded:'),
+    invalidateCache('plans:public:'),
+  ]);
 }

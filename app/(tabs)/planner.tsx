@@ -1,14 +1,16 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
   StatusBar,
   Modal,
   Pressable,
+  Animated,
+  Easing,
+  useWindowDimensions,
 } from 'react-native';
 import { ConfirmModal } from '../../src/components/ConfirmModal';
 import { AiDietPlannerModal } from '../../src/components/AiDietPlannerModal';
@@ -16,14 +18,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/theme/useTheme';
-import { Spacing, Typography, BorderRadius, Shadow } from '../../src/theme';
+import { Spacing, Typography, BorderRadius, Shadow, Motion } from '../../src/theme';
 import { usePlannerStore } from '../../src/store/plannerStore';
 import { useGroceryStore } from '../../src/store/groceryStore';
 import { useRecipeStore } from '../../src/store/recipeStore';
 import { DayOfWeek, MealType } from '../../src/types';
 import { FallbackImage } from '../../src/components/FallbackImage';
+import { useFocusEffect } from '@react-navigation/native';
 
-const DAYS: DayOfWeek[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAYS: DayOfWeek[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MEAL_TYPES: MealType[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
 
 const MEAL_ICONS: Record<MealType, string> = {
@@ -33,20 +36,108 @@ const MEAL_ICONS: Record<MealType, string> = {
   Snack: '☕',
 };
 
+function StaggeredEntry({
+  delay,
+  triggerKey,
+  children,
+}: {
+  delay: number;
+  triggerKey: string;
+  children: React.ReactNode;
+}) {
+  const entry = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    entry.setValue(0);
+    Animated.timing(entry, {
+      toValue: 1,
+      duration: Motion.STAGGER_DURATION_MS,
+      delay,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [delay, triggerKey, entry]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: entry,
+        transform: [
+          {
+            translateY: entry.interpolate({
+              inputRange: [0, 1],
+              outputRange: [Motion.STAGGER_TRANSLATE_Y, 0],
+            }),
+          },
+        ],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 export default function PlannerScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
   const router = useRouter();
+  const isCompact = width <= 360 || height <= 720;
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>('Mon');
   const [showClearModal, setShowClearModal] = useState(false);
   const [showGroceryModal, setShowGroceryModal] = useState(false);
   const [showAiPlanner, setShowAiPlanner] = useState(false);
   const [groceryDays, setGroceryDays] = useState<DayOfWeek[]>([...DAYS]);
-  const { meals, removeMeal, clearWeek, getMealsForDay } = usePlannerStore();
+  const dayTransition = useRef(new Animated.Value(1)).current;
+  const cloudFade = useRef(new Animated.Value(1)).current;
+  const { meals, removeMeal, clearWeek, getMealsForDay, syncFromSupabase, syncStatus, lastSyncedAt } = usePlannerStore();
   const { addItems } = useGroceryStore();
   const { getRecipeById, fetchById, addToCache } = useRecipeStore();
 
   const dayMeals = getMealsForDay(selectedDay);
+
+  const cloudState = useMemo(() => {
+    if (syncStatus === 'syncing') {
+      return { label: 'Syncing to cloud...', icon: 'cloud-upload-outline' as const, color: colors.warning };
+    }
+    if (syncStatus === 'error') {
+      return { label: 'Cloud sync issue', icon: 'cloud-offline-outline' as const, color: colors.error };
+    }
+    if (syncStatus === 'synced') {
+      const suffix = lastSyncedAt
+        ? ` • ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+        : '';
+      return { label: `Cloud synced${suffix}`, icon: 'cloud-done-outline' as const, color: colors.veg };
+    }
+    return { label: 'Cloud ready', icon: 'cloud-outline' as const, color: colors.textSecondary };
+  }, [syncStatus, lastSyncedAt, colors]);
+
+  useEffect(() => {
+    dayTransition.setValue(0);
+    Animated.timing(dayTransition, {
+      toValue: 1,
+      duration: Motion.TRANSITION_SHORT_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [selectedDay, dayTransition]);
+
+  useEffect(() => {
+    cloudFade.setValue(0.35);
+    Animated.timing(cloudFade, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [syncStatus, lastSyncedAt, cloudFade]);
+
+  // Re-sync whenever this tab gains focus so cloud state is restored after reinstall/login.
+  useFocusEffect(
+    useCallback(() => {
+      syncFromSupabase();
+    }, [syncFromSupabase])
+  );
 
   // Pre-load recipe data for all planned meals so getRecipeById works synchronously
   useEffect(() => {
@@ -105,48 +196,93 @@ export default function PlannerScreen() {
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Text style={[styles.title, { color: colors.text }]}>Meal Planner</Text>
-        <View style={styles.headerActions}>
+      <View style={[styles.header, isCompact && styles.headerCompact, { paddingTop: insets.top + 8 }]}>
+        <View style={styles.headerTopRow}>
+          <Text style={[styles.title, isCompact && styles.titleCompact, { color: colors.text }]}>Meal Planner</Text>
+        </View>
+        <View style={[styles.headerActions, isCompact && styles.headerActionsCompact]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionBtn,
+              isCompact && styles.actionBtnCompact,
+              { backgroundColor: colors.surface },
+              pressed && styles.actionBtnPressed,
+            ]}
+            onPress={() => router.push('/ai-generated-plan-history' as any)}
+          >
+            <Ionicons name="time-outline" size={18} color={colors.accent} />
+            <Text style={[styles.historyBtnText, isCompact && styles.headerBtnTextCompact, { color: colors.accent }]}>History</Text>
+          </Pressable>
           {meals.length > 0 && (
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: colors.surface }]}
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionBtn,
+                isCompact && styles.actionBtnCompact,
+                { backgroundColor: colors.surface },
+                pressed && styles.actionBtnPressed,
+              ]}
               onPress={() => setShowClearModal(true)}
             >
               <Ionicons name="trash-outline" size={18} color={colors.error} />
-            </TouchableOpacity>
+            </Pressable>
           )}
           {meals.length > 0 && (
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: colors.accent }]}
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionBtn,
+                isCompact && styles.actionBtnCompact,
+                { backgroundColor: colors.accent },
+                pressed && styles.actionBtnPressed,
+              ]}
               onPress={openGroceryModal}
             >
               <Ionicons name="cart-outline" size={18} color="#FFF" />
-              <Text style={styles.groceryBtnText}>Grocery List</Text>
-            </TouchableOpacity>
+              <Text style={[styles.groceryBtnText, isCompact && styles.headerBtnTextCompact]}>Grocery</Text>
+            </Pressable>
           )}
         </View>
       </View>
 
+      <View style={[styles.cloudRow, isCompact && styles.cloudRowCompact]}>
+        <Animated.View
+          style={[
+            styles.cloudBadge,
+            isCompact && styles.cloudBadgeCompact,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+              opacity: cloudFade,
+            },
+          ]}
+        >
+          <Ionicons name={cloudState.icon} size={13} color={cloudState.color} />
+          <Text style={[styles.cloudText, isCompact && styles.cloudTextCompact, { color: cloudState.color }]}>{cloudState.label}</Text>
+        </Animated.View>
+      </View>
+
       {/* Day Selector */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.daySelectorContainer}>
-        <View style={styles.daySelector}>
+      <View style={[styles.daySelectorContainer, isCompact && styles.daySelectorContainerCompact]}>
+        <View style={[styles.daySelector, isCompact && styles.daySelectorCompact]}>
           {DAYS.map((day) => {
             const count = getMealsForDay(day).length;
             return (
-              <TouchableOpacity
+              <Pressable
                 key={day}
-                style={[
+                style={({ pressed }) => [
                   styles.dayBtn,
+                  isCompact && styles.dayBtnCompact,
                   {
                     backgroundColor: selectedDay === day ? colors.accent : colors.surface,
+                    borderColor: selectedDay === day ? colors.accent : colors.border,
                   },
+                  pressed && styles.dayBtnPressed,
                 ]}
                 onPress={() => setSelectedDay(day)}
               >
                 <Text
                   style={[
                     styles.dayText,
+                    isCompact && styles.dayTextCompact,
                     { color: selectedDay === day ? '#FFF' : colors.text },
                   ]}
                 >
@@ -155,54 +291,81 @@ export default function PlannerScreen() {
                 {count > 0 && (
                   <View style={[styles.dayDot, { backgroundColor: selectedDay === day ? '#FFF' : colors.accent }]} />
                 )}
-              </TouchableOpacity>
+              </Pressable>
             );
           })}
         </View>
-      </ScrollView>
+      </View>
 
       {/* Meal Slots */}
-      <ScrollView
-        contentContainerStyle={styles.mealsContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {MEAL_TYPES.map((mealType) => {
+      <ScrollView contentContainerStyle={styles.mealsContent} showsVerticalScrollIndicator={false}>
+        <Animated.View
+          style={[
+            styles.mealsMotionLayer,
+            {
+              opacity: dayTransition,
+              transform: [
+                {
+                  translateY: dayTransition.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [8, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+        {MEAL_TYPES.map((mealType, mealTypeIndex) => {
           const mealEntries = dayMeals.filter((m) => m.mealType === mealType);
 
           return (
-            <View key={mealType} style={[styles.mealSlot, { backgroundColor: colors.surface }]}>
+            <View key={mealType} style={[styles.mealSlot, isCompact && styles.mealSlotCompact, { backgroundColor: colors.surface }]}>
               <View style={styles.mealSlotHeader}>
                 <Text style={styles.mealIcon}>{MEAL_ICONS[mealType]}</Text>
-                <Text style={[styles.mealTypeText, { color: colors.text }]}>{mealType}</Text>
-                <TouchableOpacity
+                <Text style={[styles.mealTypeText, isCompact && styles.mealTypeTextCompact, { color: colors.text }]}>{mealType}</Text>
+                <Pressable
                   onPress={() =>
                     router.push({
                       pathname: '/add-to-planner',
                       params: { day: selectedDay, mealType },
                     } as any)
                   }
-                  style={[styles.addBtn, { backgroundColor: colors.accentLight }]}
+                  style={({ pressed }) => [
+                    styles.addBtn,
+                    { backgroundColor: colors.accentLight },
+                    pressed && styles.actionBtnPressed,
+                  ]}
                 >
                   <Ionicons name="add" size={18} color={colors.accent} />
-                </TouchableOpacity>
+                </Pressable>
               </View>
 
               {mealEntries.length === 0 ? (
-                <TouchableOpacity
-                  style={[styles.emptySlot, { borderColor: colors.border }]}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/add-to-planner',
-                      params: { day: selectedDay, mealType },
-                    } as any)
-                  }
+                <StaggeredEntry
+                  delay={mealTypeIndex * Motion.STAGGER_BASE_MS}
+                  triggerKey={`${selectedDay}-${mealType}-empty`}
                 >
-                  <Text style={[styles.emptySlotText, { color: colors.textTertiary }]}>
-                    + Add {mealType.toLowerCase()}
-                  </Text>
-                </TouchableOpacity>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.emptySlot,
+                      isCompact && styles.emptySlotCompact,
+                      { borderColor: colors.border },
+                      pressed && styles.dayBtnPressed,
+                    ]}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/add-to-planner',
+                        params: { day: selectedDay, mealType },
+                      } as any)
+                    }
+                  >
+                    <Text style={[styles.emptySlotText, isCompact && styles.emptySlotTextCompact, { color: colors.textTertiary }]}>
+                      + Add {mealType.toLowerCase()}
+                    </Text>
+                  </Pressable>
+                </StaggeredEntry>
               ) : (
-                mealEntries.map((entry) => {
+                mealEntries.map((entry, entryIndex) => {
                   const recipe = getRecipeById(entry.recipeId);
                   if (!recipe) return null;
                   const dietColor =
@@ -211,27 +374,34 @@ export default function PlannerScreen() {
                     : recipe.diet === 'Non-Vegetarian' ? colors.nonVeg
                     : colors.warning;
                   return (
-                    <TouchableOpacity
+                    <StaggeredEntry
                       key={entry.id}
-                      style={[styles.mealEntry, { ...Shadow.sm, backgroundColor: colors.card }]}
-                      onPress={() => {
-                        if ((entry.recipeSource ?? 'master') === 'master') {
+                      delay={mealTypeIndex * Motion.STAGGER_BASE_MS + entryIndex * Motion.STAGGER_BASE_MS}
+                      triggerKey={`${selectedDay}-${entry.id}`}
+                    >
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.mealEntry,
+                          isCompact && styles.mealEntryCompact,
+                          { ...Shadow.sm, backgroundColor: colors.card },
+                          pressed && styles.mealEntryPressed,
+                        ]}
+                        onPress={() => {
+                          const recipeSource = entry.recipeSource ?? 'master';
                           router.push({
                             pathname: '/recipe/[id]',
-                            params: { id: recipe.id, source: 'master' },
+                            params: { id: recipe.id, source: recipeSource },
                           } as any);
-                        }
-                      }}
-                      activeOpacity={0.8}
-                    >
+                        }}
+                      >
                       <FallbackImage
                         uri={recipe.image}
-                        style={styles.mealEntryImage}
+                        style={[styles.mealEntryImage, isCompact && styles.mealEntryImageCompact]}
                         resizeMode="cover"
                       />
-                      <View style={styles.mealEntryBody}>
+                      <View style={[styles.mealEntryBody, isCompact && styles.mealEntryBodyCompact]}>
                         {/* Name */}
-                        <Text style={[styles.mealEntryName, { color: colors.text }]} numberOfLines={1}>
+                        <Text style={[styles.mealEntryName, isCompact && styles.mealEntryNameCompact, { color: colors.text }]} numberOfLines={2}>
                           {recipe.name}
                         </Text>
                         {/* Cuisine + Diet */}
@@ -271,15 +441,17 @@ export default function PlannerScreen() {
                             <Text style={[styles.mealEntryNutriLabel, { color: colors.textTertiary }]}>Fb</Text>
                           </View>
                         </View>
+                        <Text style={[styles.mealEntryHint, isCompact && styles.mealEntryHintCompact, { color: colors.textTertiary }]}>Tap to view recipe</Text>
                       </View>
-                      <TouchableOpacity
-                        onPress={() => removeMeal(entry.id)}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        style={styles.mealEntryRemove}
-                      >
-                        <Ionicons name="close-circle-outline" size={22} color={colors.textTertiary} />
-                      </TouchableOpacity>
-                    </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => removeMeal(entry.id)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          style={styles.mealEntryRemove}
+                        >
+                          <Ionicons name="close-circle-outline" size={22} color={colors.textTertiary} />
+                        </TouchableOpacity>
+                      </Pressable>
+                    </StaggeredEntry>
                   );
                 })
               )}
@@ -287,24 +459,26 @@ export default function PlannerScreen() {
           );
         })}
         <View style={{ height: Spacing['3xl'] + 80 }} />
+        </Animated.View>
       </ScrollView>
 
       {/* Floating AI Diet Planner Button */}
-      <TouchableOpacity
-        style={[
+      <Pressable
+        style={({ pressed }) => [
           styles.aiFab,
+          isCompact && styles.aiFabCompact,
           {
             backgroundColor: colors.accent,
             bottom: insets.bottom + 16,
             ...Shadow.md,
           },
+          pressed && styles.fabPressed,
         ]}
         onPress={() => setShowAiPlanner(true)}
-        activeOpacity={0.85}
       >
         <Ionicons name="sparkles" size={22} color="#FFF" />
-        <Text style={styles.aiFabText}>AI Diet Plan</Text>
-      </TouchableOpacity>
+        <Text style={[styles.aiFabText, isCompact && styles.aiFabTextCompact]}>AI Diet Plan</Text>
+      </Pressable>
 
       {/* AI Diet Planner Modal */}
       <AiDietPlannerModal
@@ -375,21 +549,17 @@ export default function PlannerScreen() {
             </TouchableOpacity>
 
             {/* Day chips */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.dayChipRow}
-            >
+            <View style={styles.dayChipRow}>
               {DAYS.map((day) => {
                 const count = getMealsForDay(day).length;
                 const hasMeals = count > 0;
                 const isSelected = groceryDays.includes(day);
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={day}
                     disabled={!hasMeals}
                     onPress={() => toggleGroceryDay(day)}
-                    style={[
+                    style={({ pressed }) => [
                       styles.dayChip,
                       {
                         backgroundColor: !hasMeals
@@ -404,8 +574,8 @@ export default function PlannerScreen() {
                           : colors.border,
                         opacity: hasMeals ? 1 : 0.4,
                       },
+                      pressed && hasMeals && styles.dayBtnPressed,
                     ]}
-                    activeOpacity={0.75}
                   >
                     <Text style={[
                       styles.dayChipLabel,
@@ -425,10 +595,10 @@ export default function PlannerScreen() {
                         </Text>
                       </View>
                     )}
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
-            </ScrollView>
+            </View>
 
             {/* Summary */}
             {groceryDays.length > 0 && (() => {
@@ -496,26 +666,82 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 10,
   },
+  aiFabCompact: {
+    right: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 5,
+  },
   aiFabText: {
     color: '#FFF',
     fontSize: Typography.fontSize.sm,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
+  aiFabTextCompact: {
+    fontSize: Typography.fontSize.xs,
+  },
+  fabPressed: {
+    transform: [{ scale: 0.96 }],
+    opacity: 0.95,
+  },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.base,
     paddingBottom: Spacing.md,
+  },
+  headerCompact: {
+    gap: 6,
+    paddingBottom: Spacing.sm,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cloudRow: {
+    paddingHorizontal: Spacing.base,
+    marginBottom: Spacing.sm,
+  },
+  cloudRowCompact: {
+    marginBottom: 6,
+  },
+  cloudBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  cloudBadgeCompact: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  cloudText: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
+  },
+  cloudTextCompact: {
+    fontSize: 10,
   },
   title: {
     fontSize: Typography.fontSize['2xl'],
     fontWeight: '800',
+    flexShrink: 1,
+  },
+  titleCompact: {
+    fontSize: Typography.fontSize.xl,
   },
   headerActions: {
     flexDirection: 'row',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
     gap: Spacing.sm,
+  },
+  headerActionsCompact: {
+    gap: 6,
   },
   actionBtn: {
     flexDirection: 'row',
@@ -525,31 +751,63 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full,
   },
+  actionBtnCompact: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  actionBtnPressed: {
+    transform: [{ scale: 0.97 }],
+    opacity: 0.9,
+  },
   groceryBtnText: {
     color: '#FFF',
     fontSize: Typography.fontSize.sm,
     fontWeight: '700',
   },
+  historyBtnText: {
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '700',
+  },
+  headerBtnTextCompact: {
+    fontSize: Typography.fontSize.xs,
+  },
   daySelectorContainer: {
-    maxHeight: 64,
+    paddingHorizontal: Spacing.base,
     marginBottom: Spacing.sm,
+  },
+  daySelectorContainerCompact: {
+    paddingHorizontal: Spacing.sm,
+    marginBottom: 6,
   },
   daySelector: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.base,
-    gap: Spacing.sm,
-    paddingVertical: Spacing.xs,
+    justifyContent: 'space-between',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  daySelectorCompact: {
+    gap: 4,
   },
   dayBtn: {
-    paddingHorizontal: Spacing.base,
-    paddingVertical: Spacing.sm,
+    flex: 1,
+    paddingVertical: 8,
     borderRadius: BorderRadius.full,
     alignItems: 'center',
-    minWidth: 60,
+    borderWidth: 1,
+  },
+  dayBtnCompact: {
+    paddingVertical: 6,
+  },
+  dayBtnPressed: {
+    transform: [{ scale: 0.96 }],
+    opacity: 0.92,
   },
   dayText: {
     fontWeight: '700',
-    fontSize: Typography.fontSize.sm,
+    fontSize: Typography.fontSize.xs,
+  },
+  dayTextCompact: {
+    fontSize: 11,
   },
   dayDot: {
     width: 5,
@@ -559,12 +817,18 @@ const styles = StyleSheet.create({
   },
   mealsContent: {
     paddingHorizontal: Spacing.base,
+  },
+  mealsMotionLayer: {
     gap: Spacing.md,
   },
   mealSlot: {
     borderRadius: BorderRadius.lg,
     padding: Spacing.md,
     gap: Spacing.sm,
+  },
+  mealSlotCompact: {
+    padding: Spacing.sm,
+    gap: 6,
   },
   mealSlotHeader: {
     flexDirection: 'row',
@@ -577,10 +841,13 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.base,
     fontWeight: '700',
   },
+  mealTypeTextCompact: {
+    fontSize: Typography.fontSize.sm,
+  },
   addBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -589,10 +856,26 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
     alignItems: 'stretch',
+    minHeight: 102,
+    position: 'relative',
+  },
+  mealEntryCompact: {
+    minHeight: 92,
+  },
+  mealEntryPressed: {
+    transform: [{ scale: 0.985 }],
+    opacity: 0.96,
   },
   mealEntryImage: {
-    width: 88,
-    height: 88,
+    width: 96,
+    height: 96,
+    margin: 8,
+    borderRadius: BorderRadius.md,
+  },
+  mealEntryImageCompact: {
+    width: 82,
+    height: 82,
+    margin: 6,
   },
   mealEntryImagePlaceholder: {
     width: 88,
@@ -602,13 +885,22 @@ const styles = StyleSheet.create({
   },
   mealEntryBody: {
     flex: 1,
-    padding: Spacing.sm,
-    gap: 3,
+    paddingVertical: Spacing.sm,
+    paddingRight: 36,
+    gap: 4,
     justifyContent: 'center',
   },
+  mealEntryBodyCompact: {
+    paddingVertical: 6,
+    gap: 3,
+  },
   mealEntryName: {
+    fontSize: Typography.fontSize.base,
+    fontWeight: '800',
+    lineHeight: 21,
+  },
+  mealEntryNameCompact: {
     fontSize: Typography.fontSize.sm,
-    fontWeight: '700',
     lineHeight: 18,
   },
   mealEntryBadgeRow: {
@@ -618,7 +910,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   mealEntryCuisine: {
-    fontSize: 11,
+    fontSize: Typography.fontSize.sm,
     fontWeight: '600',
   },
   mealEntryDietBadge: {
@@ -636,7 +928,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   mealEntryDietText: {
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '700',
   },
   mealEntryMeta: {
@@ -645,31 +937,46 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   mealEntryMetaText: {
-    fontSize: 11,
+    fontSize: Typography.fontSize.sm,
   },
   mealEntryDotSep: {
-    fontSize: 11,
+    fontSize: Typography.fontSize.sm,
     marginHorizontal: 1,
   },
   mealEntryNutrition: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 2,
+    gap: 14,
+    marginTop: 4,
   },
   mealEntryNutriChip: {
     alignItems: 'center',
   },
   mealEntryNutriVal: {
-    fontSize: 11,
+    fontSize: Typography.fontSize.sm,
     fontWeight: '800',
   },
   mealEntryNutriLabel: {
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '600',
   },
+  mealEntryHint: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  mealEntryHintCompact: {
+    fontSize: 9,
+  },
   mealEntryRemove: {
-    paddingHorizontal: Spacing.sm,
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.28)',
   },
   mealEntrySub: {
     fontSize: Typography.fontSize.xs,
@@ -681,9 +988,15 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     alignItems: 'center',
   },
+  emptySlotCompact: {
+    padding: Spacing.sm,
+  },
   emptySlotText: {
     fontSize: Typography.fontSize.sm,
     fontWeight: '500',
+  },
+  emptySlotTextCompact: {
+    fontSize: Typography.fontSize.xs,
   },
 
   // ── Grocery Modal ─────────────────────────────────────────────────────────
@@ -745,6 +1058,7 @@ const styles = StyleSheet.create({
   },
   dayChipRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.sm,
     paddingVertical: Spacing.xs,
   },

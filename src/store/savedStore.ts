@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabase';
 import { RecipeSource } from '../types';
 
+const SAVED_SYNC_TTL_MS = 1000 * 45;
+
 async function getUid(): Promise<string | null> {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.user?.id ?? null;
@@ -12,11 +14,12 @@ async function getUid(): Promise<string | null> {
 interface SavedState {
   savedIds: string[];
   savedBySource: Record<string, RecipeSource>;
+  lastCloudSyncAt: number | null;
   toggleSaved: (id: string, source?: RecipeSource) => void;
   isSaved: (id: string, source?: RecipeSource) => boolean;
   getSavedSource: (id: string) => RecipeSource | undefined;
   /** Pull saved recipe IDs from Supabase and replace local state. */
-  syncFromSupabase: () => Promise<void>;
+  syncFromSupabase: (options?: { force?: boolean }) => Promise<void>;
 }
 
 export const useSavedStore = create<SavedState>()(
@@ -24,6 +27,7 @@ export const useSavedStore = create<SavedState>()(
     (set, get) => ({
       savedIds: [],
       savedBySource: {},
+      lastCloudSyncAt: null,
 
       toggleSaved: (id, source = 'master') => {
         const current = get().savedIds;
@@ -78,7 +82,13 @@ export const useSavedStore = create<SavedState>()(
 
       getSavedSource: (id) => get().savedBySource[id],
 
-      syncFromSupabase: async () => {
+      syncFromSupabase: async (options) => {
+        const force = options?.force ?? false;
+        const last = get().lastCloudSyncAt;
+        if (!force && last && Date.now() - last < SAVED_SYNC_TTL_MS) {
+          return;
+        }
+
         const uid = await getUid();
         if (!uid) return;
         const { data, error } = await supabase
@@ -98,7 +108,7 @@ export const useSavedStore = create<SavedState>()(
         dbRows.forEach((row) => {
           savedBySource[row.id] = row.source;
         });
-        set({ savedIds: dbIds, savedBySource });
+        set({ savedIds: dbIds, savedBySource, lastCloudSyncAt: Date.now() });
       },
     }),
     {
