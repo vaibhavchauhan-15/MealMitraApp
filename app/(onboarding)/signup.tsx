@@ -21,7 +21,6 @@ import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { useUserStore } from '../../src/store/userStore';
 import { supabase } from '../../src/services/supabase';
-import * as Linking from 'expo-linking';
 import { PROFILE_ICON_OPTIONS } from '../../src/constants/profileIcons';
 import { shouldForceProfileSetup } from '../../src/utils/profileCompletion';
 import {
@@ -37,6 +36,11 @@ import {
   AuthFieldLabel,
   AuthInputContainer,
 } from '../../src/components/auth/AuthUI';
+import {
+  completeSignupWithOtp,
+  isValidSignupOtpCode,
+  requestSignupOtp,
+} from '../../src/services/signupOtpService';
 
 export default function SignupScreen() {
   const { colors, isDark } = useTheme();
@@ -50,6 +54,9 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [avatarIcon, setAvatarIcon] = useState(PROFILE_ICON_OPTIONS[0].id);
   const [loading, setLoading] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
   const [suggestingUsername, setSuggestingUsername] = useState(false);
   const [availabilityState, setAvailabilityState] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
   const [autoSuggestion, setAutoSuggestion] = useState('');
@@ -103,6 +110,21 @@ export default function SignupScreen() {
     setUsername(suggestion);
   };
 
+  const sendSignupCode = async () => {
+    setSendingCode(true);
+    const { error: otpErr } = await requestSignupOtp(email);
+    setSendingCode(false);
+
+    if (otpErr) {
+      showToast(otpErr.message, 'error', 'Could Not Send Code');
+      return false;
+    }
+
+    setCodeSent(true);
+    showToast('Verification code sent. Enter the 6-digit code from your email.', 'success', 'Code Sent');
+    return true;
+  };
+
   const handleSignup = async () => {
     if (!name.trim() || !email.trim() || !password.trim() || !username.trim()) {
       showToast('Please fill in all fields.', 'error', 'Error');
@@ -119,8 +141,6 @@ export default function SignupScreen() {
       return;
     }
 
-    setLoading(true);
-
     const uniqueUsername = await suggestUniqueUsername(supabase, normalizedUsername, {
       name,
       email,
@@ -133,41 +153,45 @@ export default function SignupScreen() {
       return;
     }
 
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
+    if (!codeSent) {
+      await sendSignupCode();
+      return;
+    }
+
+    if (!isValidSignupOtpCode(otpCode)) {
+      showToast('Enter a valid 6-digit verification code.', 'error', 'Validation');
+      return;
+    }
+
+    setLoading(true);
+    const { error: completeErr } = await completeSignupWithOtp({
+      email,
+      code: otpCode,
+      password,
+      name,
+      username: uniqueUsername,
+      avatarIcon,
+    });
+
+    if (completeErr) {
+      setLoading(false);
+      showToast(completeErr.message, 'error', 'Sign Up Failed');
+      return;
+    }
+
+    const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
       password: password.trim(),
-      options: {
-        data: {
-          name: name.trim(),
-          username: uniqueUsername,
-          avatar_icon: avatarIcon,
-        },
-        emailRedirectTo: Linking.createURL('auth/confirm'),
-      },
     });
     setLoading(false);
 
-    if (error) {
-      showToast(error.message, 'error', 'Sign Up Failed');
+    if (signInErr || !signInData.user) {
+      showToast(signInErr?.message ?? 'Account created. Please sign in.', 'info', 'Account Created');
+      router.replace('/(onboarding)/login' as any);
       return;
     }
 
-    const user = data.user;
-    const session = data.session;
-
-    if (!user) {
-      showToast('Could not create account. Please try again.', 'error', 'Error');
-      return;
-    }
-
-    // session is null when Supabase "Confirm email" is ON — user is created but unconfirmed
-    if (!session) {
-      router.push({ pathname: '/(onboarding)/email-sent' as any, params: { email: email.trim() } });
-      return;
-    }
-
-    // session exists — "Confirm email" is OFF in Supabase, user is live immediately
-    await hydrateFromAuthUser(user);
+    await hydrateFromAuthUser(signInData.user);
     const hydratedProfile = useUserStore.getState().profile;
     if (shouldForceProfileSetup(hydratedProfile)) {
       router.replace('/(onboarding)/profile-setup' as any);
@@ -287,6 +311,35 @@ export default function SignupScreen() {
             />
           </AuthInputContainer>
 
+          {codeSent && (
+            <>
+              <AuthFieldLabel text="Email verification code" color={colors.textSecondary} />
+              <AuthInputContainer backgroundColor={colors.inputBackground}>
+                <TextInput
+                  style={[styles.input, { color: colors.text }]}
+                  placeholder="6-digit code"
+                  placeholderTextColor={colors.textTertiary}
+                  value={otpCode}
+                  onChangeText={setOtpCode}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                />
+              </AuthInputContainer>
+
+              <TouchableOpacity
+                style={[styles.quickSuggestBtn, { backgroundColor: colors.accentLight }]}
+                onPress={sendSignupCode}
+                disabled={sendingCode || loading}
+              >
+                {sendingCode ? (
+                  <ActivityIndicator size="small" color={colors.accent} />
+                ) : (
+                  <Text style={[styles.quickSuggestText, { color: colors.accent }]}>Resend code</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
+
           <View style={styles.iconHeaderRow}>
             <Text style={[styles.iconPickerTitle, { color: colors.text }]}>Profile icon</Text>
             <View style={styles.selectedBadge}>
@@ -318,10 +371,10 @@ export default function SignupScreen() {
           </ScrollView>
 
           <AuthActionButton
-            label="Create Account"
+            label={codeSent ? 'Verify & Create Account' : 'Send Verification Code'}
             onPress={handleSignup}
-            loading={loading}
-            disabled={loading}
+            loading={loading || sendingCode}
+            disabled={loading || sendingCode}
             variant="primary"
             color={colors.accent}
             textColor="#FFF"

@@ -35,7 +35,11 @@ import {
   normalizeUsernameInput,
   suggestUniqueUsername,
 } from '../src/utils/username';
-import { isValidOtpCode, sendEmailOtpCode, verifyEmailOtpCode } from '../src/services/emailOtpService';
+import {
+  isValidAccountOtpCode,
+  sendAccountActionOtp,
+  verifyAccountActionOtp,
+} from '../src/services/accountActionOtpService';
 
 type Mode = 'with-password' | 'forgot-password';
 
@@ -263,7 +267,7 @@ export default function ChangeUsernameScreen() {
     }
 
     setSendingCode(true);
-    const { error } = await sendEmailOtpCode(email);
+    const { error } = await sendAccountActionOtp('change_username');
     setSendingCode(false);
 
     if (error) {
@@ -281,7 +285,7 @@ export default function ChangeUsernameScreen() {
       showToast('Please enter the verification code.', 'error', 'Validation');
       return;
     }
-    if (!isValidOtpCode(otpCode)) {
+    if (!isValidAccountOtpCode(otpCode)) {
       showToast('Enter a valid 6-digit verification code.', 'error', 'Validation');
       return;
     }
@@ -291,7 +295,7 @@ export default function ChangeUsernameScreen() {
     }
 
     setUpdating(true);
-    const { error: verifyOtpErr } = await verifyEmailOtpCode(email, otpCode);
+    const { error: verifyOtpErr } = await verifyAccountActionOtp('change_username', otpCode);
 
     if (verifyOtpErr) {
       setUpdating(false);

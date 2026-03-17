@@ -256,6 +256,10 @@ export default function LoginScreen() {
             />
           </AuthInputContainer>
 
+          <TouchableOpacity onPress={() => router.push('/(onboarding)/forgot-password' as any)}>
+            <Text style={[styles.forgotLink, { color: colors.accent }]}>Forgot password?</Text>
+          </TouchableOpacity>
+
           <AuthActionButton
             label="Sign In"
             onPress={handleLogin}
@@ -377,6 +381,13 @@ const styles = StyleSheet.create({
   googleBtnText: {
     fontSize: Typography.fontSize.base,
     fontWeight: '600',
+  },
+  forgotLink: {
+    textAlign: 'right',
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '700',
+    marginTop: -2,
+    marginBottom: Spacing.xs,
   },
   signupRow: {
     flexDirection: 'row',
