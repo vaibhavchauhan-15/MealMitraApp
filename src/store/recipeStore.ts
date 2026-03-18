@@ -61,6 +61,14 @@ function recipeToAiDbRow(recipe: Recipe, uid: string) {
   };
 }
 
+function withCurrentUserAuthor(recipe: Recipe, uid: string): Recipe {
+  if (recipe.uploadedBy) return recipe;
+  return {
+    ...recipe,
+    uploadedBy: uid,
+  };
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface RecipeState {
@@ -281,15 +289,16 @@ export const useRecipeStore = create<RecipeState>()(
 
       addAiRecipe: async (recipe) => {
         const uid = await getUid();
+        const normalized = uid ? withCurrentUserAuthor(recipe, uid) : recipe;
         // Optimistic local update first
         set((s) => ({
-          aiRecipes: [...s.aiRecipes.filter((r) => r.id !== recipe.id), recipe],
-          cache: { ...s.cache, [recipe.id]: recipe },
+          aiRecipes: [...s.aiRecipes.filter((r) => r.id !== normalized.id), normalized],
+          cache: { ...s.cache, [normalized.id]: normalized },
         }));
         if (!uid) return;
         const { error } = await supabase
           .from('user_ai_generated_recipes')
-          .upsert(recipeToAiDbRow(recipe, uid), { onConflict: 'id' });
+          .upsert(recipeToAiDbRow(normalized, uid), { onConflict: 'id' });
         if (error) console.warn('[RecipeStore] addAiRecipe:', error.message);
         else void invalidateRecipeQueryCaches();
       },
@@ -297,18 +306,21 @@ export const useRecipeStore = create<RecipeState>()(
       addAiRecipes: async (recipes) => {
         if (recipes.length === 0) return;
         const uid = await getUid();
+        const normalizedRecipes = uid
+          ? recipes.map((recipe) => withCurrentUserAuthor(recipe, uid))
+          : recipes;
         // Update local state synchronously so planner can reference the IDs immediately
         set((s) => {
           const newAi = [...s.aiRecipes];
           const newCache = { ...s.cache };
-          recipes.forEach((r) => {
+          normalizedRecipes.forEach((r) => {
             if (!newAi.find((x) => x.id === r.id)) newAi.push(r);
             newCache[r.id] = r;
           });
           return { aiRecipes: newAi, cache: newCache };
         });
         if (!uid) return;
-        const rows = recipes.map((r) => recipeToAiDbRow(r, uid));
+        const rows = normalizedRecipes.map((r) => recipeToAiDbRow(r, uid));
         const { error } = await supabase
           .from('user_ai_generated_recipes')
           .upsert(rows, { onConflict: 'id' });
@@ -342,7 +354,7 @@ export const useRecipeStore = create<RecipeState>()(
           .from('user_ai_generated_recipes')
           .select(
             'id,title,description,cuisine,diet,difficulty,cook_time,prep_time,servings,calories,' +
-            'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps,created_at'
+            'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps,created_at,user_id,user_profiles!user_ai_generated_recipes_user_id_fkey(name,username)'
           )
           .eq('user_id', uid)
           .order('created_at', { ascending: false });

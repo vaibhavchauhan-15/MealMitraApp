@@ -2,8 +2,10 @@ import React, { useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Pressable,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   type StyleProp,
@@ -110,11 +112,83 @@ export function AuthInputContainer({
   borderColor?: string;
   style?: StyleProp<ViewStyle>;
 }) {
+  const inputRef = useRef<TextInput | null>(null);
+  const resolvedBorderColor = resolveInputBorderColor(backgroundColor, borderColor);
+
+  const childrenWithFocusRef = React.Children.map(children, (child) => {
+    if (!React.isValidElement(child) || child.type !== TextInput) return child;
+
+    const originalRef = (child as any).ref;
+
+    return React.cloneElement(child as any, {
+      ref: (node: TextInput | null) => {
+        inputRef.current = node;
+        if (typeof originalRef === 'function') {
+          originalRef(node);
+        } else if (originalRef && typeof originalRef === 'object' && 'current' in originalRef) {
+          (originalRef as React.MutableRefObject<TextInput | null>).current = node;
+        }
+      },
+      style: [{ flex: 1 }, (child.props as any).style],
+    });
+  });
+
   return (
-    <View style={[styles.inputContainer, { backgroundColor, borderColor: borderColor ?? 'transparent' }, borderColor ? styles.inputContainerBordered : null, style]}>
-      {children}
-    </View>
+    <Pressable
+      style={[
+        styles.inputContainer,
+        { backgroundColor, borderColor: resolvedBorderColor },
+        styles.inputContainerBordered,
+        style,
+      ]}
+      onPress={() => inputRef.current?.focus()}
+    >
+      {childrenWithFocusRef}
+    </Pressable>
   );
+}
+
+function resolveInputBorderColor(backgroundColor: string, explicitBorderColor?: string) {
+  if (explicitBorderColor) return explicitBorderColor;
+
+  const rgb = parseColorToRgb(backgroundColor);
+  if (!rgb) return 'rgba(127, 127, 127, 0.35)';
+
+  const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+  return luminance > 0.5 ? 'rgba(0, 0, 0, 0.16)' : 'rgba(255, 255, 255, 0.28)';
+}
+
+function parseColorToRgb(color: string): { r: number; g: number; b: number } | null {
+  const value = color.trim();
+
+  if (value.startsWith('#')) {
+    const hex = value.slice(1);
+    if (hex.length === 3) {
+      const r = Number.parseInt(hex[0] + hex[0], 16);
+      const g = Number.parseInt(hex[1] + hex[1], 16);
+      const b = Number.parseInt(hex[2] + hex[2], 16);
+      return { r, g, b };
+    }
+    if (hex.length === 6) {
+      const r = Number.parseInt(hex.slice(0, 2), 16);
+      const g = Number.parseInt(hex.slice(2, 4), 16);
+      const b = Number.parseInt(hex.slice(4, 6), 16);
+      return { r, g, b };
+    }
+    return null;
+  }
+
+  const rgbMatch = value.match(/^rgba?\(([^)]+)\)$/i);
+  if (!rgbMatch) return null;
+
+  const parts = rgbMatch[1].split(',').map((part) => Number.parseFloat(part.trim()));
+  if (parts.length < 3 || parts.slice(0, 3).some((num) => Number.isNaN(num))) return null;
+
+  return {
+    r: Math.max(0, Math.min(255, parts[0])),
+    g: Math.max(0, Math.min(255, parts[1])),
+    b: Math.max(0, Math.min(255, parts[2])),
+  };
 }
 
 export function AuthInfoBox({
@@ -246,6 +320,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   inputContainer: {
+    minHeight: 52,
     borderRadius: BorderRadius.lg,
     paddingHorizontal: Spacing.base,
     flexDirection: 'row',

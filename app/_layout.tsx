@@ -3,6 +3,7 @@ import { useColorScheme, Platform } from 'react-native';
 import { Colors } from '../src/theme';
 import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
 import { supabase } from '../src/services/supabase';
 import { useUserStore } from '../src/store/userStore';
@@ -10,10 +11,15 @@ import { usePlannerStore } from '../src/store/plannerStore';
 import { useRecipeStore } from '../src/store/recipeStore';
 import { useSavedStore } from '../src/store/savedStore';
 import { shouldForceProfileSetup } from '../src/utils/profileCompletion';
+import {
+  startInteractionNotificationBridge,
+  stopInteractionNotificationBridge,
+} from '../src/services/interactionNotificationService';
 
 // expo-notifications remote push is not available in Expo Go (SDK 53+).
 // Load the module only when running in a real/dev build.
 const isExpoGo = Constants.appOwnership === 'expo';
+WebBrowser.maybeCompleteAuthSession();
 
 export default function RootLayout() {
   const scheme = useColorScheme();
@@ -37,6 +43,9 @@ export default function RootLayout() {
     syncRecentSearches();
     syncRecentlyViewed();
     syncSaved({ force: true });
+    void startInteractionNotificationBridge((url) => {
+      void handleDeepLink(url);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -44,6 +53,17 @@ export default function RootLayout() {
   // the session loads asynchronously after the initial mount effect runs)
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        // Safety guard: clear auth-coupled cached state as soon as session is gone.
+        usePlannerStore.setState({ meals: [], syncStatus: 'idle', lastSyncedAt: null });
+        useSavedStore.setState({ savedIds: [], savedBySource: {}, lastCloudSyncAt: null });
+        useRecipeStore.setState({ aiRecipes: [], recentlyViewed: [], recentSearches: [] });
+        useUserStore.setState({ profile: null, hasOnboarded: false, lastCloudSyncAt: null });
+        stopInteractionNotificationBridge();
+        router.replace('/(onboarding)' as any);
+        return;
+      }
+
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         syncPlanner({ force: true });
         syncSaved({ force: true });
@@ -51,9 +71,15 @@ export default function RootLayout() {
         syncRecipes();
         syncRecentSearches();
         syncRecentlyViewed();
+        void startInteractionNotificationBridge((url) => {
+          void handleDeepLink(url);
+        });
       }
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      stopInteractionNotificationBridge();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -103,6 +129,23 @@ export default function RootLayout() {
   }, []);
 
   const handleDeepLink = async (url: string) => {
+    const parsed = Linking.parse(url);
+    const host = (parsed.hostname ?? '').toLowerCase();
+    const path = String(parsed.path ?? '').replace(/^\/+/, '');
+
+    if (host === 'recipe') {
+      const recipeId = path.split('/')[0];
+      if (recipeId) {
+        const sourceParam = parsed.queryParams?.source;
+        const source = sourceParam === 'ai' ? 'ai' : 'master';
+        router.push({
+          pathname: '/recipe/[id]',
+          params: { id: recipeId, source },
+        } as any);
+      }
+      return;
+    }
+
     // Handle auth callbacks: mealmitra://auth/callback or mealmitra://auth/confirm
     const isAuthUrl =
       url.includes('auth/confirm') ||
@@ -179,6 +222,10 @@ export default function RootLayout() {
       <Stack.Screen name="recently-viewed" />
       <Stack.Screen name="my-recipes" />
       <Stack.Screen name="upload-recipe" />
+      <Stack.Screen name="browse-ai-recipes" />
+      <Stack.Screen name="browse-users" />
+      <Stack.Screen name="user/[id]" />
+      <Stack.Screen name="public-ai-plan/[id]" />
       <Stack.Screen name="notifications" />
       <Stack.Screen name="settings" />
       <Stack.Screen name="change-username" />

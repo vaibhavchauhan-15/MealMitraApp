@@ -92,10 +92,10 @@ export function ConfirmModal({
                   style={[
                     styles.btn,
                     styles.confirmBtn,
+                    hideCancelButton && styles.singleActionBtn,
                     {
                       backgroundColor: destructive ? colors.error : colors.accent,
                       borderColor: destructive ? colors.error : colors.accent,
-                      flex: hideCancelButton ? 1 : undefined,
                     },
                   ]}
                   onPress={onConfirm}
@@ -156,6 +156,7 @@ const styles = StyleSheet.create({
   actions: {
     alignSelf: 'stretch',
     paddingTop: 18,
+    width: '100%',
   },
   actionsRow: {
     flexDirection: 'row',
@@ -172,6 +173,9 @@ const styles = StyleSheet.create({
   },
   cancelBtn: {},
   confirmBtn: {},
+  singleActionBtn: {
+    width: '100%',
+  },
   btnText: {
     fontSize: 15,
     fontWeight: '600',

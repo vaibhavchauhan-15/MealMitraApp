@@ -35,6 +35,107 @@ function syncProfileToSupabase(profile: UserProfile) {
   });
 }
 
+const ACTIVITY_MULTIPLIERS: Record<NonNullable<UserHealthProfile['activityLevel']>, number> = {
+  sedentary: 1.2,
+  light_1_3: 1.375,
+  moderate_3_5: 1.55,
+  gym_5_days: 1.725,
+  very_active: 1.9,
+};
+
+const FITNESS_GOALS: NonNullable<UserHealthProfile['fitnessGoal']>[] = [
+  'muscle_gain',
+  'fat_loss',
+  'maintain',
+  'weight_gain',
+];
+
+const GENDERS: NonNullable<UserHealthProfile['gender']>[] = ['male', 'female'];
+
+function toOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const n = Number(value.trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function normalizeActivityLevel(value: unknown): UserHealthProfile['activityLevel'] | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value in ACTIVITY_MULTIPLIERS
+    ? (value as UserHealthProfile['activityLevel'])
+    : undefined;
+}
+
+function normalizeFitnessGoal(value: unknown): UserHealthProfile['fitnessGoal'] | undefined {
+  if (typeof value !== 'string') return undefined;
+  return FITNESS_GOALS.includes(value as NonNullable<UserHealthProfile['fitnessGoal']>)
+    ? (value as UserHealthProfile['fitnessGoal'])
+    : undefined;
+}
+
+function normalizeGender(value: unknown): UserHealthProfile['gender'] | undefined {
+  if (typeof value !== 'string') return undefined;
+  return GENDERS.includes(value as NonNullable<UserHealthProfile['gender']>)
+    ? (value as UserHealthProfile['gender'])
+    : undefined;
+}
+
+function getLegacyHealthData(data: Record<string, unknown>): Partial<UserHealthProfile> {
+  const raw = data.health_profile ?? data.healthProfile;
+  if (!raw || typeof raw !== 'object') return {};
+
+  const health = raw as Record<string, unknown>;
+  return {
+    age: toOptionalNumber(health.age),
+    gender: normalizeGender(health.gender),
+    height: toOptionalNumber(health.height ?? health.height_cm),
+    weight: toOptionalNumber(health.weight ?? health.weight_kg),
+    fitnessGoal: normalizeFitnessGoal(health.fitnessGoal ?? health.fitness_goal ?? health.goal),
+    activityLevel: normalizeActivityLevel(health.activityLevel ?? health.activity_level),
+    bmr: toOptionalNumber(health.bmr),
+    tdee: toOptionalNumber(health.tdee),
+  };
+}
+
+function deriveEnergyMetrics(health: UserHealthProfile) {
+  const { age, gender, weight, height, activityLevel } = health;
+  if (!age || !gender || !weight || !height || !activityLevel) {
+    return { bmr: health.bmr, tdee: health.tdee };
+  }
+  const base = 10 * weight + 6.25 * height - 5 * age;
+  const bmr = Math.round(gender === 'male' ? base + 5 : base - 161);
+  const tdee = Math.round(bmr * ACTIVITY_MULTIPLIERS[activityLevel]);
+  return { bmr, tdee };
+}
+
+function buildHydratedHealthProfile(
+  data: Record<string, unknown>,
+  existing?: UserHealthProfile
+): UserHealthProfile {
+  const legacy = getLegacyHealthData(data);
+
+  const merged: UserHealthProfile = {
+    ...(existing ?? {}),
+    age: toOptionalNumber(data.age) ?? legacy.age ?? existing?.age,
+    gender: normalizeGender(data.gender) ?? legacy.gender ?? existing?.gender,
+    height: toOptionalNumber(data.height_cm) ?? legacy.height ?? existing?.height,
+    weight: toOptionalNumber(data.weight_kg) ?? legacy.weight ?? existing?.weight,
+    fitnessGoal: normalizeFitnessGoal(data.fitness_goal) ?? legacy.fitnessGoal ?? existing?.fitnessGoal,
+    activityLevel: normalizeActivityLevel(data.activity_level) ?? legacy.activityLevel ?? existing?.activityLevel,
+    bmr: toOptionalNumber(data.bmr) ?? legacy.bmr ?? existing?.bmr,
+    tdee: toOptionalNumber(data.tdee) ?? legacy.tdee ?? existing?.tdee,
+  };
+
+  const { bmr, tdee } = deriveEnergyMetrics(merged);
+  return {
+    ...merged,
+    bmr,
+    tdee,
+  };
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type ThemePreference = 'system' | 'light' | 'dark';
@@ -54,7 +155,7 @@ interface UserState {
   /** Deep-merge the nested healthProfile sub-object */
   updateHealthProfile: (h: Partial<UserHealthProfile>) => void;
   setHasOnboarded: (v: boolean) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 
   // ── Sync ──────────────────────────────────────────────────────────────────────
   /** Call once on app start (after auth) to pull server profile into local store. */
@@ -105,7 +206,13 @@ export const useUserStore = create<UserState>()(
 
       setHasOnboarded: (v) => set({ hasOnboarded: v }),
 
-      logout: () => set({ profile: null, hasOnboarded: false }),
+      logout: async () => {
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+          console.warn('[UserStore] logout signOut:', error.message);
+        }
+        set({ profile: null, hasOnboarded: false, lastCloudSyncAt: null });
+      },
 
       syncFromSupabase: async (options) => {
         const force = options?.force ?? false;
@@ -114,8 +221,13 @@ export const useUserStore = create<UserState>()(
           return;
         }
 
-        const { data: { session } } = await supabase.auth.getSession();
-        const uid = session?.user?.id;
+        let uid: string | undefined;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const { data: { session } } = await supabase.auth.getSession();
+          uid = session?.user?.id;
+          if (uid) break;
+          await new Promise((resolve) => setTimeout(resolve, 220));
+        }
         if (!uid) return;
         const { data, error } = await supabase
           .from('user_profiles')
@@ -128,31 +240,26 @@ export const useUserStore = create<UserState>()(
           return;
         }
         set((s) => ({
+          // Preserve local fields only for the same authenticated user.
+          // This prevents stale profile data from another account after relogin.
           hasOnboarded: true,
           lastCloudSyncAt: Date.now(),
           profile: {
-            // Preserve any local-only fields not yet pushed
-            ...s.profile,
+            ...(s.profile?.id === uid ? s.profile : null),
             id: data.id,
-            name: data.name ?? s.profile?.name ?? '',
-            email: data.email ?? s.profile?.email ?? '',
-            username: data.username ?? s.profile?.username,
-            avatar: data.avatar_url ?? s.profile?.avatar,
-            avatarIcon: data.avatar_icon ?? s.profile?.avatarIcon,
-            dietPreferences: data.diet_preferences ?? s.profile?.dietPreferences ?? [],
-            favoriteCuisines: data.favorite_cuisines ?? s.profile?.favoriteCuisines ?? [],
-            cookingLevel: data.cooking_level ?? s.profile?.cookingLevel ?? 'Beginner',
-            // Reconstruct nested healthProfile from flat DB columns (v3 schema)
-            healthProfile: {
-              ...s.profile?.healthProfile,
-              age: data.age ?? s.profile?.healthProfile?.age,
-              gender: data.gender ?? s.profile?.healthProfile?.gender,
-              height: data.height_cm ?? s.profile?.healthProfile?.height,
-              weight: data.weight_kg ?? s.profile?.healthProfile?.weight,
-              fitnessGoal: data.fitness_goal ?? s.profile?.healthProfile?.fitnessGoal,
-              activityLevel: data.activity_level ?? s.profile?.healthProfile?.activityLevel,
-            },
-            profileCompletedAt: data.profile_completed_at ?? s.profile?.profileCompletedAt,
+            name: data.name ?? (s.profile?.id === uid ? s.profile?.name : undefined) ?? '',
+            email: data.email ?? (s.profile?.id === uid ? s.profile?.email : undefined) ?? '',
+            username: data.username ?? (s.profile?.id === uid ? s.profile?.username : undefined),
+            avatar: data.avatar_url ?? (s.profile?.id === uid ? s.profile?.avatar : undefined),
+            avatarIcon: data.avatar_icon ?? (s.profile?.id === uid ? s.profile?.avatarIcon : undefined),
+            dietPreferences: data.diet_preferences ?? (s.profile?.id === uid ? s.profile?.dietPreferences : undefined) ?? [],
+            favoriteCuisines: data.favorite_cuisines ?? (s.profile?.id === uid ? s.profile?.favoriteCuisines : undefined) ?? [],
+            cookingLevel: data.cooking_level ?? (s.profile?.id === uid ? s.profile?.cookingLevel : undefined) ?? 'Beginner',
+            healthProfile: buildHydratedHealthProfile(
+              data as Record<string, unknown>,
+              s.profile?.id === uid ? s.profile?.healthProfile : undefined
+            ),
+            profileCompletedAt: data.profile_completed_at ?? (s.profile?.id === uid ? s.profile?.profileCompletedAt : undefined),
           },
         }));
       },
@@ -189,29 +296,31 @@ export const useUserStore = create<UserState>()(
           set((s) => ({
             hasOnboarded: true,
             profile: {
-              ...s.profile,
+              ...(s.profile?.id === authUser.id ? s.profile : null),
               id: data.id,
-              name: data.name ?? s.profile?.name ?? fallbackName,
-              email: data.email ?? fallbackEmail ?? s.profile?.email ?? '',
+              name: data.name ?? (s.profile?.id === authUser.id ? s.profile?.name : undefined) ?? fallbackName,
+              email: data.email ?? fallbackEmail ?? (s.profile?.id === authUser.id ? s.profile?.email : undefined) ?? '',
               username,
-              avatar: data.avatar_url ?? s.profile?.avatar ?? authUser.user_metadata?.avatar_url ?? authUser.user_metadata?.picture ?? undefined,
+              avatar:
+                data.avatar_url ??
+                (s.profile?.id === authUser.id ? s.profile?.avatar : undefined) ??
+                authUser.user_metadata?.avatar_url ??
+                authUser.user_metadata?.picture ??
+                undefined,
               avatarIcon:
                 data.avatar_icon ??
-                s.profile?.avatarIcon ??
+                (s.profile?.id === authUser.id ? s.profile?.avatarIcon : undefined) ??
                 (authUser.user_metadata?.avatar_icon as string | undefined),
-              dietPreferences: data.diet_preferences ?? s.profile?.dietPreferences ?? [],
-              favoriteCuisines: data.favorite_cuisines ?? s.profile?.favoriteCuisines ?? [],
-              cookingLevel: data.cooking_level ?? s.profile?.cookingLevel ?? 'Beginner',
-              healthProfile: {
-                ...s.profile?.healthProfile,
-                age: data.age ?? s.profile?.healthProfile?.age,
-                gender: data.gender ?? s.profile?.healthProfile?.gender,
-                height: data.height_cm ?? s.profile?.healthProfile?.height,
-                weight: data.weight_kg ?? s.profile?.healthProfile?.weight,
-                fitnessGoal: data.fitness_goal ?? s.profile?.healthProfile?.fitnessGoal,
-                activityLevel: data.activity_level ?? s.profile?.healthProfile?.activityLevel,
-              },
-              profileCompletedAt: data.profile_completed_at ?? s.profile?.profileCompletedAt,
+              dietPreferences: data.diet_preferences ?? (s.profile?.id === authUser.id ? s.profile?.dietPreferences : undefined) ?? [],
+              favoriteCuisines: data.favorite_cuisines ?? (s.profile?.id === authUser.id ? s.profile?.favoriteCuisines : undefined) ?? [],
+              cookingLevel: data.cooking_level ?? (s.profile?.id === authUser.id ? s.profile?.cookingLevel : undefined) ?? 'Beginner',
+              healthProfile: buildHydratedHealthProfile(
+                data as Record<string, unknown>,
+                s.profile?.id === authUser.id ? s.profile?.healthProfile : undefined
+              ),
+              profileCompletedAt:
+                data.profile_completed_at ??
+                (s.profile?.id === authUser.id ? s.profile?.profileCompletedAt : undefined),
             },
           }));
 

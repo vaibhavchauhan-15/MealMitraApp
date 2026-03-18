@@ -14,9 +14,12 @@ function publicPlansKey(options: PublicPlanQueryOptions): string {
     'plans:public',
     options.offset ?? 0,
     options.limit ?? 20,
+    options.maxResults ?? 30,
+    options.sortBy ?? 'trending',
     options.titleQuery?.trim().toLowerCase() ?? '',
     options.dietType ?? '',
     typeof options.maxCalories === 'number' ? options.maxCalories : '',
+    options.excludeUserId ?? '',
   ].join(':');
 }
 
@@ -87,6 +90,9 @@ export interface PublicPlanQueryOptions {
   titleQuery?: string;
   dietType?: string;
   maxCalories?: number;
+  maxResults?: number;
+  sortBy?: 'trending' | 'recently_active';
+  excludeUserId?: string;
 }
 
 export interface ExactPublicPlanQueryInput {
@@ -438,16 +444,31 @@ export async function findMasterRecipeMatchForMeal(
 export async function getPublicAiDietPlansPage(
   options: PublicPlanQueryOptions = {}
 ): Promise<PublicPlanPage> {
-  return getCachedOrFetch(publicPlansKey(options), PLAN_CACHE_TTL_MS, async () => {
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const excludeUserId = options.excludeUserId ?? authUser?.id;
+
+  return getCachedOrFetch(publicPlansKey({ ...options, excludeUserId }), PLAN_CACHE_TTL_MS, async () => {
     const offset = options.offset ?? 0;
     const limit = options.limit ?? 20;
-    const upper = offset + limit;
+    const maxResults = Math.max(1, Math.min(options.maxResults ?? 30, 30));
+    const sortBy = options.sortBy ?? 'trending';
+
+    if (offset >= maxResults) {
+      return {
+        items: [],
+        hasMore: false,
+      };
+    }
 
     let query = supabase
       .from('diet_plans')
       .select('id,user_id,title,goal,diet_type,days,total_calories,total_protein,plan_diet_type,plan_calories,created_at,plan_data,user_profiles(name)')
       .eq('is_public', true)
       .order('created_at', { ascending: false });
+
+    if (excludeUserId) {
+      query = query.neq('user_id', excludeUserId);
+    }
 
     if (options.titleQuery && options.titleQuery.trim().length > 0) {
       query = query.ilike('title', `%${options.titleQuery.trim()}%`);
@@ -459,13 +480,38 @@ export async function getPublicAiDietPlansPage(
       query = query.lte('plan_calories', options.maxCalories);
     }
 
-    const { data, error } = await query.range(offset, upper);
+    const fetchPoolSize = Math.max(maxResults, offset + limit + 1);
+    const { data, error } = await query.limit(fetchPoolSize);
     if (error) throw error;
 
     const rows = (data ?? []).map(mapPublicPlanRow);
+    const titleQuery = options.titleQuery?.trim().toLowerCase() ?? '';
+
+    const sorted = [...rows].sort((a, b) => {
+      if (sortBy === 'recently_active') {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+
+      const aTitle = a.title.toLowerCase();
+      const bTitle = b.title.toLowerCase();
+      const aMatch = titleQuery
+        ? (aTitle === titleQuery ? 4 : 0) + (aTitle.startsWith(titleQuery) ? 3 : 0) + (aTitle.includes(titleQuery) ? 2 : 0)
+        : 0;
+      const bMatch = titleQuery
+        ? (bTitle === titleQuery ? 4 : 0) + (bTitle.startsWith(titleQuery) ? 3 : 0) + (bTitle.includes(titleQuery) ? 2 : 0)
+        : 0;
+
+      if (aMatch !== bMatch) return bMatch - aMatch;
+      const aKcal = a.plan_calories ?? a.total_calories ?? 0;
+      const bKcal = b.plan_calories ?? b.total_calories ?? 0;
+      if (aKcal !== bKcal) return bKcal - aKcal;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    const capped = sorted.slice(0, maxResults);
     return {
-      items: rows.slice(0, limit),
-      hasMore: rows.length > limit,
+      items: capped.slice(offset, offset + limit),
+      hasMore: offset + limit < capped.length,
     };
   });
 }
@@ -473,6 +519,8 @@ export async function getPublicAiDietPlansPage(
 export async function findExactPublicDietPlans(
   input: ExactPublicPlanQueryInput
 ): Promise<PublicAiDietPlanCard[]> {
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+
   const exactCalories = Math.round(input.calories);
   const exactMatchOr = [
     `and(plan_diet_type.eq.${input.dietType},plan_calories.eq.${exactCalories})`,
@@ -481,7 +529,7 @@ export async function findExactPublicDietPlans(
     `and(diet_type.eq.${input.dietType},total_calories.eq.${exactCalories})`,
   ].join(',');
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('diet_plans')
     .select('id,user_id,title,goal,diet_type,days,total_calories,total_protein,plan_diet_type,plan_calories,created_at,plan_data,user_profiles(name),diet_plan_meals(id,plan_id,recipe_id,recipe_source,day,meal_type,servings,added_at)')
     .eq('is_public', true)
@@ -494,8 +542,27 @@ export async function findExactPublicDietPlans(
     .order('created_at', { ascending: false })
     .limit(input.limit ?? 10);
 
+  if (authUser?.id) {
+    query = query.neq('user_id', authUser.id);
+  }
+
+  const { data, error } = await query;
+
   if (error) throw error;
   return (data ?? []).map(mapPublicPlanRow);
+}
+
+export async function getPublicAiDietPlanById(planId: string): Promise<PublicAiDietPlanCard | null> {
+  const { data, error } = await supabase
+    .from('diet_plans')
+    .select('id,user_id,title,goal,diet_type,days,total_calories,total_protein,plan_diet_type,plan_calories,created_at,plan_data,user_profiles(name),diet_plan_meals(id,plan_id,recipe_id,recipe_source,day,meal_type,servings,added_at)')
+    .eq('id', planId)
+    .eq('is_public', true)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return mapPublicPlanRow(data);
 }
 
 export async function uploadAiDietPlan(planId: string): Promise<void> {

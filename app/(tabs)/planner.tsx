@@ -11,6 +11,7 @@ import {
   Animated,
   Easing,
   useWindowDimensions,
+  RefreshControl,
 } from 'react-native';
 import { ConfirmModal } from '../../src/components/ConfirmModal';
 import { AiDietPlannerModal } from '../../src/components/AiDietPlannerModal';
@@ -22,9 +23,11 @@ import { Spacing, Typography, BorderRadius, Shadow, Motion } from '../../src/the
 import { usePlannerStore } from '../../src/store/plannerStore';
 import { useGroceryStore } from '../../src/store/groceryStore';
 import { useRecipeStore } from '../../src/store/recipeStore';
-import { DayOfWeek, MealType } from '../../src/types';
+import { useUserStore } from '../../src/store/userStore';
+import { DayOfWeek, MealEntry, MealType } from '../../src/types';
 import { FallbackImage } from '../../src/components/FallbackImage';
 import { useFocusEffect } from '@react-navigation/native';
+import { getDailyNutritionTargets, getExceededTargetKeys, sumNutritionFromRecipes } from '../../src/utils/plannerNutrition';
 
 const DAYS: DayOfWeek[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MEAL_TYPES: MealType[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
@@ -35,6 +38,12 @@ const MEAL_ICONS: Record<MealType, string> = {
   Dinner: '🌙',
   Snack: '☕',
 };
+
+const UNDO_REDO_WINDOW_MS = 8000;
+
+type PlannerMutation =
+  | { kind: 'remove-meal'; meal: MealEntry }
+  | { kind: 'clear-week'; meals: MealEntry[] };
 
 function StaggeredEntry({
   delay,
@@ -82,35 +91,37 @@ export default function PlannerScreen() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const router = useRouter();
+  const profile = useUserStore((s) => s.profile);
   const isCompact = width <= 360 || height <= 720;
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>('Mon');
   const [showClearModal, setShowClearModal] = useState(false);
   const [showGroceryModal, setShowGroceryModal] = useState(false);
   const [showAiPlanner, setShowAiPlanner] = useState(false);
   const [groceryDays, setGroceryDays] = useState<DayOfWeek[]>([...DAYS]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [undoAction, setUndoAction] = useState<PlannerMutation | null>(null);
+  const [redoAction, setRedoAction] = useState<PlannerMutation | null>(null);
+  const [showUndoRedoBar, setShowUndoRedoBar] = useState(false);
   const dayTransition = useRef(new Animated.Value(1)).current;
-  const cloudFade = useRef(new Animated.Value(1)).current;
-  const { meals, removeMeal, clearWeek, getMealsForDay, syncFromSupabase, syncStatus, lastSyncedAt } = usePlannerStore();
+  const undoRedoTransition = useRef(new Animated.Value(0)).current;
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const redoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { meals, addMeal, removeMeal, clearWeek, getMealsForDay, syncFromSupabase } = usePlannerStore();
   const { addItems } = useGroceryStore();
   const { getRecipeById, fetchById, addToCache } = useRecipeStore();
 
   const dayMeals = getMealsForDay(selectedDay);
+  const nutritionTargets = useMemo(() => getDailyNutritionTargets(profile), [profile]);
 
-  const cloudState = useMemo(() => {
-    if (syncStatus === 'syncing') {
-      return { label: 'Syncing to cloud...', icon: 'cloud-upload-outline' as const, color: colors.warning };
-    }
-    if (syncStatus === 'error') {
-      return { label: 'Cloud sync issue', icon: 'cloud-offline-outline' as const, color: colors.error };
-    }
-    if (syncStatus === 'synced') {
-      const suffix = lastSyncedAt
-        ? ` • ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-        : '';
-      return { label: `Cloud synced${suffix}`, icon: 'cloud-done-outline' as const, color: colors.veg };
-    }
-    return { label: 'Cloud ready', icon: 'cloud-outline' as const, color: colors.textSecondary };
-  }, [syncStatus, lastSyncedAt, colors]);
+  const dayNutritionTotals = useMemo(() => {
+    const recipes = dayMeals.map((entry) => getRecipeById(entry.recipeId));
+    return sumNutritionFromRecipes(recipes);
+  }, [dayMeals, getRecipeById]);
+
+  const exceededTargetKeys = useMemo(
+    () => (nutritionTargets ? getExceededTargetKeys(dayNutritionTotals, nutritionTargets) : []),
+    [dayNutritionTotals, nutritionTargets]
+  );
 
   useEffect(() => {
     dayTransition.setValue(0);
@@ -122,22 +133,125 @@ export default function PlannerScreen() {
     }).start();
   }, [selectedDay, dayTransition]);
 
-  useEffect(() => {
-    cloudFade.setValue(0.35);
-    Animated.timing(cloudFade, {
-      toValue: 1,
-      duration: 260,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [syncStatus, lastSyncedAt, cloudFade]);
-
   // Re-sync whenever this tab gains focus so cloud state is restored after reinstall/login.
   useFocusEffect(
     useCallback(() => {
       syncFromSupabase();
     }, [syncFromSupabase])
   );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await syncFromSupabase({ force: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [syncFromSupabase]);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      if (redoTimerRef.current) clearTimeout(redoTimerRef.current);
+    };
+  }, []);
+
+  const hasUndoRedoAction = Boolean(undoAction || redoAction);
+
+  useEffect(() => {
+    if (hasUndoRedoAction) {
+      setShowUndoRedoBar(true);
+      Animated.spring(undoRedoTransition, {
+        toValue: 1,
+        useNativeDriver: true,
+        speed: 16,
+        bounciness: 5,
+      }).start();
+      return;
+    }
+
+    Animated.timing(undoRedoTransition, {
+      toValue: 0,
+      duration: Motion.TRANSITION_SHORT_MS,
+      easing: Easing.inOut(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setShowUndoRedoBar(false);
+    });
+  }, [hasUndoRedoAction, undoRedoTransition]);
+
+  const scheduleUndoExpiry = useCallback(() => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => setUndoAction(null), UNDO_REDO_WINDOW_MS);
+  }, []);
+
+  const scheduleRedoExpiry = useCallback(() => {
+    if (redoTimerRef.current) clearTimeout(redoTimerRef.current);
+    redoTimerRef.current = setTimeout(() => setRedoAction(null), UNDO_REDO_WINDOW_MS);
+  }, []);
+
+  const applyMutation = useCallback((mutation: PlannerMutation, mode: 'apply' | 'revert') => {
+    if (mutation.kind === 'remove-meal') {
+      if (mode === 'apply') {
+        removeMeal(mutation.meal.id);
+      } else {
+        addMeal(
+          mutation.meal.day,
+          mutation.meal.mealType,
+          mutation.meal.recipeId,
+          mutation.meal.servings,
+          mutation.meal.recipeSource ?? 'master'
+        );
+      }
+      return;
+    }
+
+    if (mode === 'apply') {
+      clearWeek();
+      return;
+    }
+
+    mutation.meals.forEach((meal) => {
+      addMeal(
+        meal.day,
+        meal.mealType,
+        meal.recipeId,
+        meal.servings,
+        meal.recipeSource ?? 'master'
+      );
+    });
+  }, [addMeal, clearWeek, removeMeal]);
+
+  const queueUndo = useCallback((mutation: PlannerMutation) => {
+    setUndoAction(mutation);
+    setRedoAction(null);
+    if (redoTimerRef.current) clearTimeout(redoTimerRef.current);
+    scheduleUndoExpiry();
+  }, [scheduleUndoExpiry]);
+
+  const handleRemoveMeal = useCallback((meal: MealEntry) => {
+    const mutation: PlannerMutation = { kind: 'remove-meal', meal };
+    applyMutation(mutation, 'apply');
+    queueUndo(mutation);
+  }, [applyMutation, queueUndo]);
+
+  const handleUndo = useCallback(() => {
+    if (!undoAction) return;
+    applyMutation(undoAction, 'revert');
+    setRedoAction(undoAction);
+    setUndoAction(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    scheduleRedoExpiry();
+  }, [applyMutation, scheduleRedoExpiry, undoAction]);
+
+  const handleRedo = useCallback(() => {
+    if (!redoAction) return;
+    applyMutation(redoAction, 'apply');
+    setUndoAction(redoAction);
+    setRedoAction(null);
+    if (redoTimerRef.current) clearTimeout(redoTimerRef.current);
+    scheduleUndoExpiry();
+  }, [applyMutation, redoAction, scheduleUndoExpiry]);
 
   // Pre-load recipe data for all planned meals so getRecipeById works synchronously
   useEffect(() => {
@@ -243,23 +357,6 @@ export default function PlannerScreen() {
         </View>
       </View>
 
-      <View style={[styles.cloudRow, isCompact && styles.cloudRowCompact]}>
-        <Animated.View
-          style={[
-            styles.cloudBadge,
-            isCompact && styles.cloudBadgeCompact,
-            {
-              backgroundColor: colors.surface,
-              borderColor: colors.border,
-              opacity: cloudFade,
-            },
-          ]}
-        >
-          <Ionicons name={cloudState.icon} size={13} color={cloudState.color} />
-          <Text style={[styles.cloudText, isCompact && styles.cloudTextCompact, { color: cloudState.color }]}>{cloudState.label}</Text>
-        </Animated.View>
-      </View>
-
       {/* Day Selector */}
       <View style={[styles.daySelectorContainer, isCompact && styles.daySelectorContainerCompact]}>
         <View style={[styles.daySelector, isCompact && styles.daySelectorCompact]}>
@@ -298,7 +395,57 @@ export default function PlannerScreen() {
       </View>
 
       {/* Meal Slots */}
-      <ScrollView contentContainerStyle={styles.mealsContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.mealsContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+            progressBackgroundColor={colors.surface}
+          />
+        }
+      >
+        <View style={[styles.dayStatsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={styles.dayStatsHeaderRow}>
+            <Text style={[styles.dayStatsTitle, { color: colors.text }]}>{selectedDay} totals</Text>
+            {nutritionTargets ? (
+              <Text style={[styles.dayStatsSub, { color: exceededTargetKeys.length ? colors.error : colors.textSecondary }]}>
+                {exceededTargetKeys.length
+                  ? `Over target: ${exceededTargetKeys.join(', ')}`
+                  : 'Within daily target'}
+              </Text>
+            ) : (
+              <Text style={[styles.dayStatsSub, { color: colors.textSecondary }]}>Set profile targets for guardrails</Text>
+            )}
+          </View>
+
+          <View style={styles.dayStatsRow}>
+            <View style={[styles.dayStatPill, { backgroundColor: colors.accent + '16', borderColor: colors.accent + '55' }]}>
+              <Text style={[styles.dayStatLabel, { color: colors.accent }]}>Kcal</Text>
+              <Text style={[styles.dayStatValue, { color: colors.accent }]}>{dayNutritionTotals.calories}{nutritionTargets ? `/${nutritionTargets.calories}` : ''}</Text>
+            </View>
+            <View style={[styles.dayStatPill, { backgroundColor: '#3B82F615', borderColor: '#3B82F655' }]}>
+              <Text style={[styles.dayStatLabel, { color: '#3B82F6' }]}>P</Text>
+              <Text style={[styles.dayStatValue, { color: '#3B82F6' }]}>{dayNutritionTotals.protein}g{nutritionTargets ? `/${nutritionTargets.protein}` : ''}</Text>
+            </View>
+            <View style={[styles.dayStatPill, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B55' }]}>
+              <Text style={[styles.dayStatLabel, { color: '#F59E0B' }]}>C</Text>
+              <Text style={[styles.dayStatValue, { color: '#F59E0B' }]}>{dayNutritionTotals.carbs}g{nutritionTargets ? `/${nutritionTargets.carbs}` : ''}</Text>
+            </View>
+            <View style={[styles.dayStatPill, { backgroundColor: '#EF444415', borderColor: '#EF444455' }]}>
+              <Text style={[styles.dayStatLabel, { color: '#EF4444' }]}>F</Text>
+              <Text style={[styles.dayStatValue, { color: '#EF4444' }]}>{dayNutritionTotals.fat}g{nutritionTargets ? `/${nutritionTargets.fat}` : ''}</Text>
+            </View>
+            <View style={[styles.dayStatPill, { backgroundColor: '#22C55E15', borderColor: '#22C55E55' }]}>
+              <Text style={[styles.dayStatLabel, { color: '#22C55E' }]}>Fb</Text>
+              <Text style={[styles.dayStatValue, { color: '#22C55E' }]}>{dayNutritionTotals.fiber}g{nutritionTargets ? `/${nutritionTargets.fiber}` : ''}</Text>
+            </View>
+          </View>
+        </View>
+
         <Animated.View
           style={[
             styles.mealsMotionLayer,
@@ -444,7 +591,7 @@ export default function PlannerScreen() {
                         <Text style={[styles.mealEntryHint, isCompact && styles.mealEntryHintCompact, { color: colors.textTertiary }]}>Tap to view recipe</Text>
                       </View>
                         <TouchableOpacity
-                          onPress={() => removeMeal(entry.id)}
+                          onPress={() => handleRemoveMeal(entry)}
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           style={styles.mealEntryRemove}
                         >
@@ -489,18 +636,88 @@ export default function PlannerScreen() {
       <ConfirmModal
         visible={showClearModal}
         title="Clear Week"
-        message="Remove all planned meals for the week?"
-        confirmText="Clear"
+        message="Remove all planned meals for this week? You can undo right after clearing."
+        confirmText="Clear Week"
         cancelText="Cancel"
         destructive
         icon="trash-outline"
         iconColor="#EF4444"
         onConfirm={() => {
           setShowClearModal(false);
-          clearWeek();
+          const snapshot = [...meals];
+          const mutation: PlannerMutation = { kind: 'clear-week', meals: snapshot };
+          applyMutation(mutation, 'apply');
+          queueUndo(mutation);
         }}
         onCancel={() => setShowClearModal(false)}
       />
+
+      {showUndoRedoBar && (
+        <Animated.View
+          pointerEvents={hasUndoRedoAction ? 'auto' : 'none'}
+          style={[
+            styles.undoRedoBar,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              bottom: insets.bottom + 88,
+              opacity: undoRedoTransition,
+              transform: [
+                {
+                  translateY: undoRedoTransition.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [12, 0],
+                  }),
+                },
+                {
+                  scale: undoRedoTransition.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.98, 1],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.undoRedoTitle, { color: colors.text }]}>
+              {undoAction ? 'Change applied' : 'Change restored'}
+            </Text>
+            <Text style={[styles.undoRedoSub, { color: colors.textSecondary }]} numberOfLines={1}>
+              {undoAction
+                ? undoAction.kind === 'clear-week'
+                  ? 'Cleared this week plan'
+                  : `Removed ${undoAction.meal.mealType.toLowerCase()} recipe`
+                : redoAction?.kind === 'clear-week'
+                  ? 'Week plan restored'
+                  : `Restored ${redoAction?.meal.mealType.toLowerCase()} recipe`}
+            </Text>
+          </View>
+          {undoAction ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.undoRedoBtn,
+                { borderColor: colors.accent },
+                pressed && styles.dayBtnPressed,
+              ]}
+              onPress={handleUndo}
+            >
+              <Text style={[styles.undoRedoBtnText, { color: colors.accent }]}>Undo</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={({ pressed }) => [
+                styles.undoRedoBtn,
+                { borderColor: colors.accent },
+                pressed && styles.dayBtnPressed,
+              ]}
+              onPress={handleRedo}
+            >
+              <Text style={[styles.undoRedoBtnText, { color: colors.accent }]}>Redo</Text>
+            </Pressable>
+          )}
+        </Animated.View>
+      )}
 
       {/* Grocery Day Selector Modal */}
       <Modal
@@ -698,34 +915,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  cloudRow: {
-    paddingHorizontal: Spacing.base,
-    marginBottom: Spacing.sm,
-  },
-  cloudRowCompact: {
-    marginBottom: 6,
-  },
-  cloudBadge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-  },
-  cloudBadgeCompact: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  cloudText: {
-    fontSize: Typography.fontSize.xs,
-    fontWeight: '700',
-  },
-  cloudTextCompact: {
-    fontSize: 10,
-  },
   title: {
     fontSize: Typography.fontSize['2xl'],
     fontWeight: '800',
@@ -817,6 +1006,49 @@ const styles = StyleSheet.create({
   },
   mealsContent: {
     paddingHorizontal: Spacing.base,
+    paddingTop: Spacing.sm,
+  },
+  dayStatsCard: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.sm,
+    gap: 8,
+    marginBottom: Spacing.sm,
+  },
+  dayStatsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  dayStatsTitle: {
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '800',
+  },
+  dayStatsSub: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '600',
+  },
+  dayStatsRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  dayStatPill: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+  },
+  dayStatLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  dayStatValue: {
+    marginTop: 1,
+    fontSize: 11,
+    fontWeight: '800',
   },
   mealsMotionLayer: {
     gap: Spacing.md,
@@ -966,6 +1198,37 @@ const styles = StyleSheet.create({
   },
   mealEntryHintCompact: {
     fontSize: 9,
+  },
+  undoRedoBar: {
+    position: 'absolute',
+    left: Spacing.base,
+    right: Spacing.base,
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    ...Shadow.sm,
+  },
+  undoRedoTitle: {
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '800',
+  },
+  undoRedoSub: {
+    fontSize: Typography.fontSize.xs,
+    marginTop: 1,
+  },
+  undoRedoBtn: {
+    borderWidth: 1.4,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 8,
+  },
+  undoRedoBtnText: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '800',
   },
   mealEntryRemove: {
     position: 'absolute',

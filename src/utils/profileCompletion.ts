@@ -6,5 +6,14 @@ import type { UserProfile } from '../types';
  */
 export function shouldForceProfileSetup(profile: UserProfile | null | undefined): boolean {
   if (!profile || profile.id === 'guest') return false;
-  return !profile.profileCompletedAt;
+
+  if (profile.profileCompletedAt) return false;
+
+  // Backward compatibility: older profile rows may miss profile_completed_at
+  // even when preferences were already saved.
+  const hasSavedPreferences =
+    (profile.dietPreferences?.length ?? 0) > 0 ||
+    (profile.favoriteCuisines?.length ?? 0) > 0;
+
+  return !hasSavedPreferences;
 }

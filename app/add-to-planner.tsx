@@ -15,9 +15,13 @@ import { useTheme } from '../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius, Shadow } from '../src/theme';
 import { useRecipeStore } from '../src/store/recipeStore';
 import { usePlannerStore } from '../src/store/plannerStore';
-import { searchRecipes } from '../src/services/searchService';
+import { searchRecipes, getRecipeByIdFromSource } from '../src/services/searchService';
+import { useUserStore } from '../src/store/userStore';
 import { DayOfWeek, Recipe } from '../src/types';
 import { FallbackImage } from '../src/components/FallbackImage';
+import { useToast } from '../src/hooks/useToast';
+import { Toast } from '../src/components/Toast';
+import { getDailyNutritionTargets, getExceededTargetKeys, sumNutritionFromRecipes } from '../src/utils/plannerNutrition';
 
 const DIET_COLOR: Record<string, string> = {
   Vegetarian: '#22C55E',
@@ -32,7 +36,10 @@ export default function AddToPlannerScreen() {
   const router = useRouter();
   const { day, mealType } = useLocalSearchParams<{ day: string; mealType: string }>();
   const addMeal = usePlannerStore((s) => s.addMeal);
-  const { featured, addToCache } = useRecipeStore();
+  const getMealsForDay = usePlannerStore((s) => s.getMealsForDay);
+  const profile = useUserStore((s) => s.profile);
+  const { featured, addToCache, getRecipeById } = useRecipeStore();
+  const { toast, showToast } = useToast();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Recipe[]>(featured);
   const [loading, setLoading] = useState(false);
@@ -55,11 +62,43 @@ export default function AddToPlannerScreen() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [query]);
 
-  const handleSelect = (recipeId: string) => {
-    if (day && mealType) {
-      addMeal(day as DayOfWeek, mealType as any, recipeId, 2);
+  const targets = getDailyNutritionTargets(profile);
+
+  const handleSelect = async (selectedRecipe: Recipe) => {
+    if (!day || !mealType) return;
+
+    const plannedMeals = getMealsForDay(day as DayOfWeek);
+    const plannedRecipes = await Promise.all(
+      plannedMeals.map(async (entry) => {
+        const fromCache = getRecipeById(entry.recipeId);
+        if (fromCache) return fromCache;
+        return getRecipeByIdFromSource(entry.recipeId, entry.recipeSource ?? 'master');
+      })
+    );
+
+    const nextTotals = sumNutritionFromRecipes([...plannedRecipes, selectedRecipe]);
+    if (targets) {
+      const exceeded = getExceededTargetKeys(nextTotals, targets);
+      if (exceeded.length > 0) {
+        const labelMap: Record<string, string> = {
+          calories: 'Calories',
+          protein: 'Protein',
+          carbs: 'Carbs',
+          fat: 'Fat',
+          fiber: 'Fiber',
+        };
+        showToast(
+          `Adding this meal will exceed: ${exceeded.map((k) => labelMap[k]).join(', ')}`,
+          'error',
+          'Target exceeded'
+        );
+        return;
+      }
     }
-    router.back();
+
+    addMeal(day as DayOfWeek, mealType as any, selectedRecipe.id, 2, 'master');
+    showToast('Meal added within your daily target.', 'success', 'Added');
+    setTimeout(() => router.back(), 180);
   };
 
   const renderRecipeItem = ({ item }: { item: Recipe }) => {
@@ -67,7 +106,7 @@ export default function AddToPlannerScreen() {
     return (
       <TouchableOpacity
         style={[styles.recipeItem, { backgroundColor: colors.card, ...Shadow.sm }]}
-        onPress={() => handleSelect(item.id)}
+        onPress={() => handleSelect(item)}
         activeOpacity={0.75}
       >
         <FallbackImage uri={item.image} style={styles.recipeImage} resizeMode="cover" />
@@ -173,6 +212,13 @@ export default function AddToPlannerScreen() {
             </View>
           ) : null
         }
+      />
+
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        title={toast.title}
       />
     </View>
   );

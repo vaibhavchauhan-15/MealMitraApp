@@ -18,9 +18,53 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../src/theme/useTheme';
 import { BorderRadius, Shadow, Spacing, Typography, Motion } from '../src/theme';
 import { useUserStore } from '../src/store/userStore';
-import { getUploadedUserAiDietPlansPage, SavedAiDietPlan } from '../src/services/aiPlanSupabaseService';
+import { usePlannerStore } from '../src/store/plannerStore';
+import { useRecipeStore } from '../src/store/recipeStore';
+import { Toast } from '../src/components/Toast';
+import { useToast } from '../src/hooks/useToast';
+import { DayOfWeek, MealType } from '../src/types';
+import { getRecipeByIdFromSource } from '../src/services/searchService';
+import { getDailyNutritionTargets, getExceededTargetKeys, sumNutritionFromRecipes } from '../src/utils/plannerNutrition';
+import {
+  getUploadedUserAiDietPlansPage,
+  getUserAiDietPlanMealsPage,
+  SavedAiDietPlan,
+  SavedAiDietPlanMeal,
+} from '../src/services/aiPlanSupabaseService';
 
 const PAGE_SIZE = 14;
+
+const SLOT_COLORS: Record<string, string> = {
+  Breakfast: '#F59E0B',
+  Lunch: '#22C55E',
+  Snack: '#8B5CF6',
+  Dinner: '#3B82F6',
+};
+
+function toPlannerDay(value: string): DayOfWeek {
+  const labels: DayOfWeek[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const d = new Date(`${value}T12:00:00Z`);
+  return labels[d.getUTCDay()] ?? 'Mon';
+}
+
+function normalizePlanMealsForPlanner(meals: SavedAiDietPlanMeal[]) {
+  const bySlot = new Map<string, { day: DayOfWeek; mealType: MealType; recipeId: string; recipeSource: 'master' | 'ai'; servings: number }>();
+
+  meals.forEach((meal) => {
+    const day = toPlannerDay(meal.day);
+    const mealType = meal.meal_type as MealType;
+    const key = `${day}-${mealType}`;
+    bySlot.set(key, {
+      day,
+      mealType,
+      recipeId: meal.recipe_id,
+      recipeSource: (meal.recipe_source ?? 'master') as 'master' | 'ai',
+      servings: meal.servings ?? 1,
+    });
+  });
+
+  return Array.from(bySlot.values());
+}
 
 function StaggeredEntry({
   delay,
@@ -80,20 +124,30 @@ function HistoryCard({
   colors,
   compact,
   onPress,
+  onAddToPlanner,
+  adding,
 }: {
   item: SavedAiDietPlan;
   colors: any;
   compact: boolean;
   onPress: () => void;
+  onAddToPlanner: () => void;
+  adding: boolean;
 }) {
   const totalSlots = item.diet_plan_meals?.length ?? 0;
   const totalDays = item.days ?? 0;
-  const mealCounts = {
-    Breakfast: item.diet_plan_meals?.filter((m) => m.meal_type === 'Breakfast').length ?? 0,
-    Lunch: item.diet_plan_meals?.filter((m) => m.meal_type === 'Lunch').length ?? 0,
-    Snack: item.diet_plan_meals?.filter((m) => m.meal_type === 'Snack').length ?? 0,
-    Dinner: item.diet_plan_meals?.filter((m) => m.meal_type === 'Dinner').length ?? 0,
-  };
+  const mealCounts = (item.diet_plan_meals ?? []).reduce(
+    (acc, meal) => {
+      if (meal.meal_type in acc) acc[meal.meal_type as keyof typeof acc] += 1;
+      return acc;
+    },
+    {
+      Breakfast: 0,
+      Lunch: 0,
+      Snack: 0,
+      Dinner: 0,
+    }
+  );
 
   return (
     <Pressable
@@ -111,7 +165,7 @@ function HistoryCard({
           {item.title}
         </Text>
         <View style={styles.cardRight}> 
-          <View style={[styles.publicBadge, { backgroundColor: colors.accentLight }]}>
+          <View style={[styles.publicBadge, { backgroundColor: colors.accent + '20', borderColor: colors.accent + '55' }]}>
             <Text style={[styles.publicBadgeText, { color: colors.accent }]}>Uploaded</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
@@ -133,17 +187,17 @@ function HistoryCard({
       </View>
 
       <View style={[styles.statsRow, compact && styles.statsRowCompact]}>
-        <View style={[styles.statPill, { backgroundColor: colors.background }]}> 
-          <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Calories</Text>
-          <Text style={[styles.statValue, { color: colors.text }]}>{item.total_calories} kcal</Text>
+        <View style={[styles.statPill, { backgroundColor: colors.accent + '16', borderColor: colors.accent + '55' }]}> 
+          <Text style={[styles.statLabel, { color: colors.accent }]}>Calories</Text>
+          <Text style={[styles.statValue, { color: colors.accent }]}>{item.total_calories} kcal</Text>
         </View>
-        <View style={[styles.statPill, { backgroundColor: colors.background }]}> 
-          <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Protein</Text>
-          <Text style={[styles.statValue, { color: colors.text }]}>{item.total_protein} g</Text>
+        <View style={[styles.statPill, { backgroundColor: '#3B82F615', borderColor: '#3B82F655' }]}> 
+          <Text style={[styles.statLabel, { color: '#3B82F6' }]}>Protein</Text>
+          <Text style={[styles.statValue, { color: '#3B82F6' }]}>{item.total_protein} g</Text>
         </View>
-        <View style={[styles.statPill, { backgroundColor: colors.background }]}> 
-          <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Slots</Text>
-          <Text style={[styles.statValue, { color: colors.text }]}>{totalSlots}</Text>
+        <View style={[styles.statPill, { backgroundColor: '#22C55E15', borderColor: '#22C55E55' }]}> 
+          <Text style={[styles.statLabel, { color: '#22C55E' }]}>Slots</Text>
+          <Text style={[styles.statValue, { color: '#22C55E' }]}>{totalSlots}</Text>
         </View>
       </View>
 
@@ -151,13 +205,34 @@ function HistoryCard({
         <Text style={[styles.slotBreakdownTitle, { color: colors.textTertiary }]}>Meal slots</Text>
         <View style={styles.slotPillRow}>
           {Object.entries(mealCounts).map(([label, count]) => (
-            <View key={label} style={[styles.slotPill, { backgroundColor: colors.background, borderColor: colors.border }]}> 
-              <Text style={[styles.slotPillText, { color: colors.textSecondary }]}>{label.slice(0, 1)}</Text>
-              <Text style={[styles.slotPillValue, { color: colors.text }]}>{count}</Text>
+            <View key={label} style={[styles.slotPill, { backgroundColor: (SLOT_COLORS[label] ?? colors.accent) + '14', borderColor: (SLOT_COLORS[label] ?? colors.accent) + '60' }]}> 
+              <Text style={[styles.slotPillText, { color: SLOT_COLORS[label] ?? colors.accent }]}>{label.slice(0, 1)}</Text>
+              <Text style={[styles.slotPillValue, { color: SLOT_COLORS[label] ?? colors.accent }]}>{count}</Text>
             </View>
           ))}
         </View>
       </View>
+
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation();
+          onAddToPlanner();
+        }}
+        style={({ pressed }) => [
+          styles.addPlanBtn,
+          { backgroundColor: colors.accent },
+          pressed && styles.cardPressed,
+        ]}
+      >
+        {adding ? (
+          <ActivityIndicator size="small" color="#FFF" />
+        ) : (
+          <>
+            <Ionicons name="calendar-outline" size={16} color="#FFF" />
+            <Text style={styles.addPlanBtnText}>Add to Planner</Text>
+          </>
+        )}
+      </Pressable>
     </Pressable>
   );
 }
@@ -169,6 +244,10 @@ export default function AiGeneratedPlanHistoryScreen() {
   const router = useRouter();
   const isCompact = width <= 360 || height <= 720;
   const profile = useUserStore((s) => s.profile);
+  const plannerMeals = usePlannerStore((s) => s.meals);
+  const addMeal = usePlannerStore((s) => s.addMeal);
+  const { getRecipeById } = useRecipeStore();
+  const { toast, showToast } = useToast();
 
   const [items, setItems] = useState<SavedAiDietPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -176,7 +255,9 @@ export default function AiGeneratedPlanHistoryScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState('');
+  const [addingPlanId, setAddingPlanId] = useState<string | null>(null);
   const listTransition = useState(() => new Animated.Value(1))[0];
+  const nutritionTargets = getDailyNutritionTargets(profile);
 
   const loadPage = useCallback(async (offset: number, reset: boolean) => {
     if (!profile?.id) {
@@ -239,6 +320,113 @@ export default function AiGeneratedPlanHistoryScreen() {
     }).start();
   }, [items.length, listTransition]);
 
+  const handleAddPlanFromHistory = useCallback(async (plan: SavedAiDietPlan) => {
+    if (!profile?.id) {
+      showToast('Please login to add plans to planner.', 'error', 'Login required');
+      return;
+    }
+
+    setAddingPlanId(plan.id);
+    try {
+      let planMeals = plan.diet_plan_meals ?? [];
+      if (planMeals.length === 0) {
+        const all: SavedAiDietPlanMeal[] = [];
+        let offset = 0;
+        let hasMoreMeals = true;
+        while (hasMoreMeals) {
+          const page = await getUserAiDietPlanMealsPage(profile.id, plan.id, { offset, limit: 100 });
+          all.push(...page.items);
+          hasMoreMeals = page.hasMore && page.items.length > 0;
+          offset += page.items.length;
+        }
+        planMeals = all;
+      }
+
+      if (planMeals.length === 0) {
+        showToast('No meal slots found in this plan.', 'error', 'Nothing to add');
+        return;
+      }
+
+      const normalized = normalizePlanMealsForPlanner(planMeals);
+      const existingBySlot = new Map(plannerMeals.map((m) => [`${m.day}-${m.mealType}`, m]));
+
+      const isDuplicatePlan =
+        normalized.length > 0 &&
+        normalized.every((slot) => {
+          const existing = existingBySlot.get(`${slot.day}-${slot.mealType}`);
+          return (
+            !!existing &&
+            existing.recipeId === slot.recipeId &&
+            (existing.recipeSource ?? 'master') === slot.recipeSource
+          );
+        });
+
+      if (isDuplicatePlan) {
+        showToast('This plan already exists in your planner.', 'error', 'Duplicate plan');
+        return;
+      }
+
+      if (nutritionTargets) {
+        const planByDay = new Map<DayOfWeek, typeof normalized>();
+        normalized.forEach((slot) => {
+          if (!planByDay.has(slot.day)) planByDay.set(slot.day, []);
+          planByDay.get(slot.day)!.push(slot);
+        });
+
+        const exceededDays: string[] = [];
+        const labelMap: Record<string, string> = {
+          calories: 'Calories',
+          protein: 'Protein',
+          carbs: 'Carbs',
+          fat: 'Fat',
+          fiber: 'Fiber',
+        };
+
+        for (const [day, slots] of planByDay.entries()) {
+          const incomingSlotKeys = new Set(slots.map((slot) => `${slot.day}-${slot.mealType}`));
+          const existingForDay = plannerMeals.filter(
+            (m) => m.day === day && !incomingSlotKeys.has(`${m.day}-${m.mealType}`)
+          );
+          const existingRecipes = await Promise.all(
+            existingForDay.map(async (meal) => {
+              const cached = getRecipeById(meal.recipeId);
+              if (cached) return cached;
+              return getRecipeByIdFromSource(meal.recipeId, meal.recipeSource ?? 'master');
+            })
+          );
+
+          const incomingRecipes = await Promise.all(
+            slots.map(async (slot) => {
+              const cached = getRecipeById(slot.recipeId);
+              if (cached) return cached;
+              return getRecipeByIdFromSource(slot.recipeId, slot.recipeSource);
+            })
+          );
+
+          const totals = sumNutritionFromRecipes([...existingRecipes, ...incomingRecipes]);
+          const exceeded = getExceededTargetKeys(totals, nutritionTargets);
+          if (exceeded.length > 0) {
+            exceededDays.push(`${day} (${exceeded.map((k) => labelMap[k]).join(', ')})`);
+          }
+        }
+
+        if (exceededDays.length > 0) {
+          showToast(`Plan exceeds target on: ${exceededDays.join(' · ')}`, 'error', 'Target exceeded');
+          return;
+        }
+      }
+
+      normalized.forEach((slot) => {
+        addMeal(slot.day, slot.mealType, slot.recipeId, slot.servings, slot.recipeSource);
+      });
+      showToast(`Added ${normalized.length} meal slots to planner.`, 'success', 'Plan added');
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed to add this plan to planner.', 'error', 'Add failed');
+    } finally {
+      setAddingPlanId(null);
+    }
+  }, [addMeal, getRecipeById, nutritionTargets, plannerMeals, profile?.id, showToast]);
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}> 
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
@@ -261,7 +449,7 @@ export default function AiGeneratedPlanHistoryScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color={colors.accent} style={{ marginTop: Spacing['2xl'] }} />
+        <ActivityIndicator color={colors.textSecondary} style={{ marginTop: Spacing['2xl'] }} />
       ) : (
         <Animated.View
           style={{
@@ -305,6 +493,8 @@ export default function AiGeneratedPlanHistoryScreen() {
                   item={item}
                   colors={colors}
                   compact={isCompact}
+                  adding={addingPlanId === item.id}
+                  onAddToPlanner={() => handleAddPlanFromHistory(item)}
                   onPress={() =>
                     router.push({
                       pathname: '/ai-generated-plan-history/[id]',
@@ -322,7 +512,7 @@ export default function AiGeneratedPlanHistoryScreen() {
             }
             ListFooterComponent={
               loadingMore ? (
-                <ActivityIndicator color={colors.accent} style={{ marginTop: Spacing.md }} />
+                <ActivityIndicator color={colors.textSecondary} style={{ marginTop: Spacing.md }} />
               ) : (
                 <View style={{ height: Spacing.xl }} />
               )
@@ -330,6 +520,13 @@ export default function AiGeneratedPlanHistoryScreen() {
           />
         </Animated.View>
       )}
+
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        title={toast.title}
+      />
     </View>
   );
 }
@@ -419,6 +616,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    borderWidth: 1,
   },
   publicBadgeText: {
     fontSize: Typography.fontSize.xs,
@@ -451,6 +649,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
+    borderWidth: 1,
   },
   statLabel: {
     fontSize: Typography.fontSize.xs,
@@ -489,6 +688,20 @@ const styles = StyleSheet.create({
   },
   slotPillValue: {
     fontSize: Typography.fontSize.xs,
+    fontWeight: '800',
+  },
+  addPlanBtn: {
+    marginTop: 2,
+    borderRadius: BorderRadius.full,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  addPlanBtnText: {
+    color: '#FFF',
+    fontSize: Typography.fontSize.sm,
     fontWeight: '800',
   },
   errorCard: {

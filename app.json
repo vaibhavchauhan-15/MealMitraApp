@@ -2,6 +2,7 @@
   "expo": {
     "name": "MealMitra",
     "slug": "mealmitra",
+    "owner": "vaibhavchauhan_15",
     "scheme": "mealmitra",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -54,6 +55,16 @@
               "scheme": "mealmitra",
               "host": "auth",
               "pathPrefix": "/callback"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "mealmitra",
+              "host": "recipe"
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]

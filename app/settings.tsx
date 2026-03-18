@@ -156,9 +156,9 @@ export default function SettingsScreen() {
         destructive
         icon="log-out-outline"
         iconColor="#EF4444"
-        onConfirm={() => {
+        onConfirm={async () => {
           setShowLogoutModal(false);
-          logout();
+          await logout();
           router.replace('/(onboarding)' as any);
         }}
         onCancel={() => setShowLogoutModal(false)}

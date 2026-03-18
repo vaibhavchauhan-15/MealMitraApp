@@ -32,6 +32,7 @@ import {
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as Linking from 'expo-linking';
+import Constants from 'expo-constants';
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
@@ -46,6 +47,68 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const { toast, showToast } = useToast();
   const googleLoadingRef = useRef(false);
+  const expoOwnerFallback = 'vaibhavchauhan_15';
+  const expoSlugFallback = 'mealmitra';
+
+  const routeAfterHydration = (source: 'password' | 'oauth-session' | 'oauth-auth-state' | 'oauth-callback') => {
+    const hydratedProfile = useUserStore.getState().profile;
+    const shouldSetup = shouldForceProfileSetup(hydratedProfile);
+
+    if (__DEV__) {
+      const skipReason = (() => {
+        if (!hydratedProfile || hydratedProfile.id === 'guest') return 'guest-or-missing-profile';
+        if (hydratedProfile.profileCompletedAt) return 'profile_completed_at-present';
+
+        const hasLegacyPreferences =
+          (hydratedProfile.dietPreferences?.length ?? 0) > 0 ||
+          (hydratedProfile.favoriteCuisines?.length ?? 0) > 0;
+        if (hasLegacyPreferences) return 'legacy-preferences-present';
+
+        return 'not-skipped';
+      })();
+
+      if (!shouldSetup) {
+        console.info(`[LoginFlow][DEV] profile-setup skipped (${source}): ${skipReason}`);
+      }
+    }
+
+    if (shouldSetup) {
+      router.replace('/(onboarding)/profile-setup' as any);
+      return;
+    }
+
+    router.replace('/(tabs)' as any);
+  };
+
+  const getOAuthRedirectUrl = () => {
+    // Expo Go should use the Expo auth proxy redirect.
+    if (Constants.appOwnership === 'expo') {
+      const owner = Constants.expoConfig?.owner ?? expoOwnerFallback;
+      const slug = Constants.expoConfig?.slug ?? expoSlugFallback;
+      const projectNameForProxy = `@${owner}/${slug}`;
+      const redirect = `https://auth.expo.io/${projectNameForProxy}`;
+      return redirect;
+    }
+
+    return AuthSession.makeRedirectUri({
+      scheme: 'mealmitra',
+      path: 'auth/callback',
+    });
+  };
+
+  const completeOAuthFromExistingSession = async () => {
+    for (let i = 0; i < 7; i += 1) {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (user) {
+        await hydrateFromAuthUser(user);
+        routeAfterHydration('oauth-session');
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+    return false;
+  };
 
   // Safety net: when the app comes back to the foreground while googleLoading is true,
   // check if auth succeeded. If not, the user cancelled — reset loading state.
@@ -55,14 +118,32 @@ export default function LoginScreen() {
   }, [googleLoading]);
 
   useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!googleLoadingRef.current) return;
+      if (event !== 'SIGNED_IN' && event !== 'TOKEN_REFRESHED') return;
+
+      const user = session?.user;
+      if (!user) return;
+
+      await hydrateFromAuthUser(user);
+      setGoogleLoading(false);
+      routeAfterHydration('oauth-auth-state');
+    });
+
+    return () => subscription.unsubscribe();
+  }, [hydrateFromAuthUser, router]);
+
+  useEffect(() => {
     const subscription = AppState.addEventListener('change', async (nextState) => {
       if (nextState === 'active' && googleLoadingRef.current) {
         // Give the Linking handler in _layout.tsx time to process and navigate first
         await new Promise((resolve) => setTimeout(resolve, 1500));
-        // If still mounted and no session, user cancelled
+        // Session may already be set even when AuthSession returns dismiss.
         if (googleLoadingRef.current) {
-          const { data } = await supabase.auth.getSession();
-          if (!data.session) {
+          const finished = await completeOAuthFromExistingSession();
+          if (!finished) {
             setGoogleLoading(false);
           }
         }
@@ -74,10 +155,7 @@ export default function LoginScreen() {
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     try {
-      const redirectTo = AuthSession.makeRedirectUri({
-        scheme: 'mealmitra',
-        path: 'auth/callback',
-      });
+      const redirectTo = getOAuthRedirectUrl();
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -93,21 +171,23 @@ export default function LoginScreen() {
         return;
       }
 
-      if (Platform.OS === 'android') {
-        // On Android, Chrome Custom Tabs (used by openAuthSessionAsync) don't reliably
-        // close when redirecting to a custom scheme on Android 12+ / Chrome 107+.
-        // Instead, open the URL in the system browser and let the Linking listener
-        // in _layout.tsx complete the flow when the deep link fires.
-        await Linking.openURL(data.url);
-        // The AppState listener above handles resetting loading if user cancels.
-      } else {
-        // iOS: ASWebAuthenticationSession handles custom scheme redirects correctly.
+      const isExpoGo = Constants.appOwnership === 'expo';
+
+      // In Expo Go, AuthSession can monitor the return URI and hand control back.
+      if (isExpoGo || Platform.OS === 'ios') {
         const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
         if (result.type === 'success' && result.url) {
           await handleOAuthCallback(result.url);
         } else {
-          setGoogleLoading(false);
+          const finished = await completeOAuthFromExistingSession();
+          if (!finished) {
+            setGoogleLoading(false);
+          }
         }
+      } else {
+        // Native Android builds use external browser + deep-link fallback.
+        await Linking.openURL(data.url);
+        // The AppState listener above handles resetting loading if user cancels.
       }
     } catch (err: any) {
       showToast(err?.message ?? 'Google sign-in failed', 'error', 'Error');
@@ -151,12 +231,7 @@ export default function LoginScreen() {
 
       if (user) {
         await hydrateFromAuthUser(user);
-        const hydratedProfile = useUserStore.getState().profile;
-        if (shouldForceProfileSetup(hydratedProfile)) {
-          router.replace('/(onboarding)/profile-setup' as any);
-          return;
-        }
-        router.replace('/(tabs)' as any);
+        routeAfterHydration('oauth-callback');
       } else {
         setGoogleLoading(false);
       }
@@ -194,12 +269,7 @@ export default function LoginScreen() {
     }
     const user = data.user;
     await hydrateFromAuthUser(user);
-    const hydratedProfile = useUserStore.getState().profile;
-    if (shouldForceProfileSetup(hydratedProfile)) {
-      router.replace('/(onboarding)/profile-setup' as any);
-      return;
-    }
-    router.replace('/(tabs)' as any);
+    routeAfterHydration('password');
   };
 
   const handleGuest = () => {

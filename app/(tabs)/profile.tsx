@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,28 +7,144 @@ import {
   TouchableOpacity,
   Image,
   StatusBar,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../../src/theme';
 import { useUserStore } from '../../src/store/userStore';
 import { useSavedStore } from '../../src/store/savedStore';
+import { usePlannerStore } from '../../src/store/plannerStore';
+import { useRecipeStore } from '../../src/store/recipeStore';
+import { useInteractionNotificationStore } from '../../src/store/interactionNotificationStore';
 import { getProfileIconById } from '../../src/constants/profileIcons';
 
 type MenuItem = { icon: string; label: string; badge?: number; onPress: () => void };
+
+function toNumberOrUndefined(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const n = Number(value.trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+const ACTIVITY_MULTIPLIERS: Record<string, number> = {
+  sedentary: 1.2,
+  light_1_3: 1.375,
+  moderate_3_5: 1.55,
+  gym_5_days: 1.725,
+  very_active: 1.9,
+};
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
+
   const profile = useUserStore((s) => s.profile);
   const logout = useUserStore((s) => s.logout);
-  const setHasOnboarded = useUserStore((s) => s.setHasOnboarded);
+  const userLastCloudSyncAt = useUserStore((s) => s.lastCloudSyncAt);
+  const syncUserFromSupabase = useUserStore((s) => s.syncFromSupabase);
+
   const savedCount = useSavedStore((s) => s.savedIds.length);
+  const savedLastCloudSyncAt = useSavedStore((s) => s.lastCloudSyncAt);
+  const syncSavedFromSupabase = useSavedStore((s) => s.syncFromSupabase);
+
+  const plannerMealsCount = usePlannerStore((s) => s.meals.length);
+  const plannerSyncStatus = usePlannerStore((s) => s.syncStatus);
+  const plannerLastSyncedAt = usePlannerStore((s) => s.lastSyncedAt);
+  const syncPlannerFromSupabase = usePlannerStore((s) => s.syncFromSupabase);
+
+  const aiRecipeCount = useRecipeStore((s) => s.aiRecipes.length);
+  const syncAiRecipesFromSupabase = useRecipeStore((s) => s.syncAiRecipesFromSupabase);
+  const unreadNotificationCount = useInteractionNotificationStore((s) => s.unreadCount);
+
   const avatarIcon = getProfileIconById(profile?.avatarIcon);
-  const hasCompletedProfile = Boolean(profile?.profileCompletedAt);
+
+  useFocusEffect(
+    useCallback(() => {
+      void Promise.all([
+        syncUserFromSupabase({ force: true }),
+        syncSavedFromSupabase({ force: true }),
+        syncPlannerFromSupabase({ force: true }),
+        syncAiRecipesFromSupabase(),
+      ]);
+    }, [syncUserFromSupabase, syncSavedFromSupabase, syncPlannerFromSupabase, syncAiRecipesFromSupabase])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        syncUserFromSupabase({ force: true }),
+        syncSavedFromSupabase({ force: true }),
+        syncPlannerFromSupabase({ force: true }),
+        syncAiRecipesFromSupabase(),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [syncUserFromSupabase, syncSavedFromSupabase, syncPlannerFromSupabase, syncAiRecipesFromSupabase]);
+
+  const cloudLastSyncedAt = useMemo(
+    () =>
+      [userLastCloudSyncAt, savedLastCloudSyncAt, plannerLastSyncedAt]
+        .filter(Boolean)
+        .sort((a, b) => (b as number) - (a as number))[0] ?? null,
+    [userLastCloudSyncAt, savedLastCloudSyncAt, plannerLastSyncedAt]
+  );
+
+  const cloudSyncLabel = useMemo(() => {
+    if (!profile?.id) return 'Cloud sync inactive';
+    if (plannerSyncStatus === 'syncing') return 'Cloud syncing';
+    if (plannerSyncStatus === 'error') return 'Cloud sync issue';
+    const syncedAtLabel = cloudLastSyncedAt
+      ? new Date(cloudLastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : null;
+    return syncedAtLabel ? `Cloud synced ${syncedAtLabel}` : 'Cloud sync ready';
+  }, [profile?.id, plannerSyncStatus, cloudLastSyncedAt]);
+
+  const cloudSyncColor = useMemo(() => {
+    if (!profile?.id) return colors.textSecondary;
+    if (plannerSyncStatus === 'syncing') return colors.warning;
+    if (plannerSyncStatus === 'error') return colors.error;
+    return colors.veg;
+  }, [profile?.id, plannerSyncStatus, colors]);
+
+  const health = profile?.healthProfile;
+  const tdee = useMemo(() => {
+    const cloudTdee = toNumberOrUndefined(health?.tdee);
+    if (cloudTdee) return Math.round(cloudTdee);
+
+    const age = toNumberOrUndefined(health?.age);
+    const weightValue = toNumberOrUndefined(health?.weight);
+    const height = toNumberOrUndefined(health?.height);
+    const gender = health?.gender;
+    const activityLevel = health?.activityLevel;
+
+    if (!age || !weightValue || !height || !gender || !activityLevel) return undefined;
+    const activityMultiplier = ACTIVITY_MULTIPLIERS[activityLevel];
+    if (!activityMultiplier) return undefined;
+
+    const base = 10 * weightValue + 6.25 * height - 5 * age;
+    const bmr = Math.round(gender === 'male' ? base + 5 : base - 161);
+    return Math.round(bmr * activityMultiplier);
+  }, [health?.tdee, health?.age, health?.weight, health?.height, health?.gender, health?.activityLevel]);
+  const weight = useMemo(() => {
+    const n = toNumberOrUndefined(health?.weight);
+    return n ? Math.round(n * 10) / 10 : undefined;
+  }, [health?.weight]);
+  const goalLabel = useMemo(() => {
+    const goal = health?.fitnessGoal;
+    if (!goal) return 'Not set';
+    return goal.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }, [health?.fitnessGoal]);
 
   const libraryMenu: MenuItem[] = [
     { icon: 'bookmark-outline', label: 'Saved Recipes', badge: savedCount || undefined, onPress: () => router.push('/(tabs)/saved' as any) },
@@ -36,7 +152,12 @@ export default function ProfileScreen() {
   ];
 
   const appMenu: MenuItem[] = [
-    { icon: 'notifications-outline', label: 'Notifications', onPress: () => router.push('/notifications' as any) },
+    {
+      icon: 'notifications-outline',
+      label: 'Notifications',
+      badge: unreadNotificationCount || undefined,
+      onPress: () => router.push('/notifications' as any),
+    },
     { icon: 'settings-outline', label: 'Settings', onPress: () => router.push('/settings' as any) },
   ];
 
@@ -48,24 +169,22 @@ export default function ProfileScreen() {
   const MenuGroup = ({ title, items }: { title: string; items: MenuItem[] }) => (
     <View style={styles.group}>
       <Text style={[styles.groupLabel, { color: colors.textSecondary }]}>{title}</Text>
-      <View style={[styles.groupCard, { backgroundColor: colors.surface }]}>
+      <View style={[styles.groupCard, { backgroundColor: colors.surface }]}> 
         {items.map((item, idx) => (
           <React.Fragment key={item.label}>
-            <TouchableOpacity style={styles.menuRow} onPress={item.onPress} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.menuRow} onPress={item.onPress} activeOpacity={0.75}>
               <View style={[styles.menuIcon, { backgroundColor: colors.accentLight }]}>
                 <Ionicons name={item.icon as any} size={18} color={colors.accent} />
               </View>
               <Text style={[styles.menuLabel, { color: colors.text }]}>{item.label}</Text>
               {item.badge ? (
                 <View style={[styles.badge, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.badgeText}>{item.badge}</Text>
+                  <Text style={styles.badgeText}>{item.badge > 99 ? '99+' : item.badge}</Text>
                 </View>
               ) : null}
-              <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+              <Ionicons name="chevron-forward" size={15} color={colors.textTertiary} />
             </TouchableOpacity>
-            {idx < items.length - 1 && (
-              <View style={[styles.rowDivider, { backgroundColor: colors.border }]} />
-            )}
+            {idx < items.length - 1 && <View style={[styles.rowDivider, { backgroundColor: colors.border }]} />}
           </React.Fragment>
         ))}
       </View>
@@ -76,166 +195,127 @@ export default function ProfileScreen() {
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      {/* Top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + 6, borderBottomColor: colors.border }]}>
         <Text style={[styles.topTitle, { color: colors.text }]}>Profile</Text>
         <TouchableOpacity
           style={[styles.topIconBtn, { backgroundColor: colors.surface }]}
           onPress={() => router.push('/settings' as any)}
-          activeOpacity={0.7}
+          activeOpacity={0.75}
         >
           <Ionicons name="settings-outline" size={19} color={colors.text} />
         </TouchableOpacity>
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 28 }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+            progressBackgroundColor={colors.surface}
+          />
+        }
       >
-        {/* ── Hero ────────────────────────────────────────────────────────── */}
-        <View style={[styles.heroCard, { backgroundColor: colors.surface }]}>
-          {/* Avatar + pencil edit button */}
-          <View style={styles.avatarWrap}>
-            <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
-              {profile?.avatar ? (
-                <Image source={{ uri: profile.avatar }} style={styles.avatarImg} />
-              ) : avatarIcon ? (
-                <Ionicons name={avatarIcon.icon} size={34} color="#FFF" />
-              ) : (
-                <Text style={styles.avatarLetter}>
-                  {profile?.name ? profile.name[0].toUpperCase() : '👤'}
-                </Text>
-              )}
-            </View>
-            <TouchableOpacity
-              style={[styles.avatarEditBtn, { backgroundColor: colors.accent }]}
-              onPress={() => router.push('/edit-profile' as any)}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="pencil" size={11} color="#FFF" />
-            </TouchableOpacity>
+        <View style={[styles.profileCard, { backgroundColor: colors.surface }]}> 
+          <View style={[styles.syncRow, { borderColor: colors.border, backgroundColor: colors.background }]}> 
+            <Ionicons name="cloud-done-outline" size={13} color={cloudSyncColor} />
+            <Text style={[styles.syncText, { color: cloudSyncColor }]}>{cloudSyncLabel}</Text>
           </View>
 
-          <Text style={[styles.heroName, { color: colors.text }]}>
-            {profile?.name || 'Food Enthusiast'}
-          </Text>
-          {!!profile?.username && (
-            <Text style={[styles.heroUsername, { color: colors.accent }]}>@{profile.username}</Text>
-          )}
-          <Text style={[styles.heroEmail, { color: colors.textSecondary }]}>
-            {profile?.email || 'Tap the pencil to set up your profile'}
-          </Text>
+          <View style={[styles.avatar, { backgroundColor: colors.accent }]}> 
+            {profile?.avatar ? (
+              <Image source={{ uri: profile.avatar }} style={styles.avatarImg} />
+            ) : avatarIcon ? (
+              <Ionicons name={avatarIcon.icon} size={28} color="#FFF" />
+            ) : (
+              <Text style={styles.avatarLetter}>{profile?.name ? profile.name[0].toUpperCase() : 'U'}</Text>
+            )}
+          </View>
 
-          {/* Chips: cooking level + first diet */}
-          {(profile?.cookingLevel || profile?.dietPreferences?.[0]) && (
-            <View style={styles.chipsRow}>
-              {profile?.cookingLevel && (
-                <View style={[styles.chip, { backgroundColor: colors.accentLight }]}>
-                  <Ionicons name="flame-outline" size={11} color={colors.accent} />
-                  <Text style={[styles.chipTxt, { color: colors.accent }]}>{profile.cookingLevel} Cook</Text>
-                </View>
-              )}
-              {profile?.dietPreferences?.[0] && (
-                <View style={[styles.chip, { backgroundColor: colors.accentLight }]}>
-                  <Ionicons name="leaf-outline" size={11} color={colors.accent} />
-                  <Text style={[styles.chipTxt, { color: colors.accent }]}>{profile.dietPreferences[0]}</Text>
-                </View>
-              )}
-            </View>
-          )}
+          <Text style={[styles.name, { color: colors.text }]}>{profile?.name || 'Food Enthusiast'}</Text>
+          {!!profile?.username && <Text style={[styles.username, { color: colors.accent }]}>@{profile.username}</Text>}
+          <Text style={[styles.email, { color: colors.textSecondary }]}>{profile?.email || 'Complete your profile details'}</Text>
 
-          {/* Stats */}
-          <View style={[styles.statsRow, { borderTopColor: colors.border }]}>
-            <View style={styles.stat}>
-              <Text style={[styles.statVal, { color: colors.text }]}>{savedCount}</Text>
-              <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Saved</Text>
+          <TouchableOpacity
+            style={[styles.editBtn, { borderColor: colors.border }]}
+            onPress={() => router.push('/edit-profile' as any)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="create-outline" size={15} color={colors.text} />
+            <Text style={[styles.editBtnText, { color: colors.text }]}>Edit Profile</Text>
+          </TouchableOpacity>
+
+          <View style={[styles.quickStats, { borderTopColor: colors.border }]}>
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatValue, { color: colors.text }]}>{savedCount}</Text>
+              <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Saved</Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-            <View style={styles.stat}>
-              <Text style={[styles.statVal, { color: colors.text }]}>0</Text>
-              <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Reviews</Text>
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatValue, { color: colors.text }]}>{plannerMealsCount}</Text>
+              <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Planner</Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-            <View style={styles.stat}>
-              <Text style={[styles.statVal, { color: colors.text }]}>0</Text>
-              <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Recipes</Text>
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatValue, { color: colors.text }]}>{aiRecipeCount}</Text>
+              <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>AI Recipes</Text>
             </View>
           </View>
         </View>
 
-        {/* ── Health snapshot / nudge ──────────────────────────────────────── */}
-        {hasCompletedProfile ? (
-          <View style={[styles.healthCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.healthTitle, { color: colors.textSecondary }]}>HEALTH STATS</Text>
-            <View style={styles.healthRow}>
-              {[
-                { label: 'TDEE', value: `${profile?.healthProfile?.tdee ?? '—'}`, unit: 'kcal', color: colors.accent },
-                { label: 'Weight', value: `${profile?.healthProfile?.weight ?? '—'}`, unit: 'kg', color: '#22C55E' },
-                { label: 'Goal', value: (profile?.healthProfile?.fitnessGoal ?? '—').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), unit: '', color: '#F59E0B' },
-              ].map((item, i, arr) => (
-                <React.Fragment key={item.label}>
-                  <View style={styles.healthItem}>
-                    <Text style={[styles.healthVal, { color: item.color }]}>
-                      {item.value}{item.unit ? <Text style={styles.healthUnit}> {item.unit}</Text> : null}
-                    </Text>
-                    <Text style={[styles.healthLbl, { color: colors.textSecondary }]}>{item.label}</Text>
-                  </View>
-                  {i < arr.length - 1 && (
-                    <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-                  )}
-                </React.Fragment>
-              ))}
+        <View style={[styles.healthCard, { backgroundColor: colors.surface }]}> 
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>HEALTH STATS</Text>
+          <View style={styles.healthGrid}>
+            <View style={[styles.healthTile, { backgroundColor: colors.accentLight }]}>
+              <Text style={[styles.healthValue, { color: colors.accent }]}>{tdee ? `${tdee} kcal` : 'Not set'}</Text>
+              <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>TDEE</Text>
+            </View>
+            <View style={[styles.healthTile, { backgroundColor: colors.accentLight }]}>
+              <Text style={[styles.healthValue, { color: colors.success }]}>{weight ? `${weight} kg` : 'Not set'}</Text>
+              <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Weight</Text>
+            </View>
+            <View style={[styles.healthTile, { backgroundColor: colors.accentLight }]}>
+              <Text style={[styles.healthValue, { color: '#F59E0B' }]}>{goalLabel}</Text>
+              <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Goal</Text>
             </View>
           </View>
-        ) : (
-          <TouchableOpacity
-            style={[styles.nudgeCard, { backgroundColor: colors.accent }]}
-            onPress={() => router.push('/edit-profile' as any)}
-            activeOpacity={0.85}
-          >
-            <View style={styles.nudgeIcon}>
-              <Ionicons name="analytics-outline" size={20} color="#FFF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nudgeTitle}>Complete Your Profile</Text>
-              <Text style={styles.nudgeSub}>Get personalised recipes & AI diet plans</Text>
-            </View>
-            <Ionicons name="arrow-forward" size={18} color="#FFF" />
-          </TouchableOpacity>
-        )}
+        </View>
 
-        {/* ── My Recipes quick actions ─────────────────────────────────── */}
         <View style={styles.group}>
           <Text style={[styles.groupLabel, { color: colors.textSecondary }]}>MY RECIPES</Text>
-          <View style={[styles.recipeActionsCard, { backgroundColor: colors.surface }]}>
+          <View style={[styles.actionCard, { backgroundColor: colors.surface }]}> 
             <TouchableOpacity
-              style={[styles.recipeActionBtn, { backgroundColor: colors.accentLight }]}
+              style={[styles.actionButton, { backgroundColor: colors.accentLight }]}
               onPress={() => router.push('/my-recipes' as any)}
               activeOpacity={0.8}
             >
               <Ionicons name="restaurant-outline" size={18} color={colors.accent} />
-              <Text style={[styles.recipeActionText, { color: colors.accent }]}>View My Recipes</Text>
+              <Text style={[styles.actionText, { color: colors.accent }]}>View My Recipes</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.recipeActionBtn, { backgroundColor: colors.accent }]}
+              style={[styles.actionButton, { backgroundColor: colors.accent }]}
               onPress={() => router.push('/upload-recipe' as any)}
               activeOpacity={0.8}
             >
               <Ionicons name="cloud-upload-outline" size={18} color="#FFF" />
-              <Text style={[styles.recipeActionText, { color: '#FFF' }]}>Upload Recipe</Text>
+              <Text style={[styles.actionText, { color: '#FFF' }]}>Upload Recipe</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── Menu groups ─────────────────────────────────────────────────── */}
         <MenuGroup title="MY LIBRARY" items={libraryMenu} />
         <MenuGroup title="APP" items={appMenu} />
         <MenuGroup title="SUPPORT" items={supportMenu} />
 
-        {/* ── Log Out ─────────────────────────────────────────────────────── */}
         <TouchableOpacity
           style={[styles.logoutBtn, { borderColor: colors.error }]}
-          onPress={() => { logout(); setHasOnboarded(false); router.replace('/(onboarding)' as any); }}
+          onPress={async () => {
+            await logout();
+            router.replace('/(onboarding)' as any);
+          }}
           activeOpacity={0.8}
         >
           <Ionicons name="log-out-outline" size={18} color={colors.error} />
@@ -250,8 +330,6 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-
-  // top bar
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -262,144 +340,173 @@ const styles = StyleSheet.create({
   },
   topTitle: { fontSize: Typography.fontSize.xl, fontWeight: '800' },
   topIconBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
   scrollContent: {
     paddingHorizontal: Spacing.base,
     paddingTop: Spacing.base,
     gap: Spacing.sm,
   },
-
-  // hero card
-  heroCard: {
-    borderRadius: BorderRadius.xl,
-    paddingTop: Spacing.xl,
-    paddingBottom: 0,
-    paddingHorizontal: Spacing.lg,
-    alignItems: 'center',
-    gap: Spacing.xs,
-    overflow: 'hidden',
-  },
-  avatarWrap: { position: 'relative', marginBottom: 4 },
-  avatar: {
-    width: 84, height: 84, borderRadius: 42,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  avatarImg: { width: 84, height: 84, borderRadius: 42 },
-  avatarLetter: { fontSize: 36, color: '#FFF', fontWeight: '800' },
-  avatarEditBtn: {
-    position: 'absolute', bottom: 0, right: 0,
-    width: 26, height: 26, borderRadius: 13,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: '#FFF',
-  },
-  heroName: { fontSize: Typography.fontSize['2xl'], fontWeight: '800', marginTop: 4 },
-  heroUsername: { fontSize: Typography.fontSize.sm, fontWeight: '700' },
-  heroEmail: { fontSize: Typography.fontSize.sm, marginBottom: 4 },
-
-  chipsRow: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 2 },
-  chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 5,
+  syncRow: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    zIndex: 2,
     borderRadius: BorderRadius.full,
-  },
-  chipTxt: { fontSize: 11, fontWeight: '700' },
-
-  statsRow: {
+    borderWidth: 1,
+    paddingVertical: 5,
+    paddingHorizontal: 9,
     flexDirection: 'row',
-    width: '100%',
-    marginTop: Spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.md,
-    justifyContent: 'space-around',
+    alignItems: 'center',
+    gap: 5,
+    maxWidth: '90%',
   },
-  stat: { alignItems: 'center', gap: 2 },
-  statVal: { fontSize: Typography.fontSize.xl, fontWeight: '800' },
-  statLbl: { fontSize: Typography.fontSize.xs, fontWeight: '500' },
+  syncText: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
+  },
+  profileCard: {
+    borderRadius: BorderRadius.xl,
+    paddingHorizontal: Spacing.base,
+    paddingBottom: Spacing.base,
+    paddingTop: Spacing.xl,
+    alignItems: 'center',
+    gap: 4,
+  },
+  avatar: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.xs,
+  },
+  avatarImg: { width: 76, height: 76, borderRadius: 38 },
+  avatarLetter: { fontSize: 30, fontWeight: '800', color: '#FFF' },
+  name: { fontSize: Typography.fontSize.xl, fontWeight: '800' },
+  username: { fontSize: Typography.fontSize.sm, fontWeight: '700' },
+  email: { fontSize: Typography.fontSize.xs, marginBottom: 8 },
+  editBtn: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  editBtnText: { fontSize: Typography.fontSize.sm, fontWeight: '600' },
+  quickStats: {
+    width: '100%',
+    marginTop: Spacing.base,
+    paddingTop: Spacing.base,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  quickStatItem: { flex: 1, alignItems: 'center' },
+  quickStatValue: { fontSize: Typography.fontSize.lg, fontWeight: '800' },
+  quickStatLabel: { fontSize: Typography.fontSize.xs, marginTop: 2, fontWeight: '600' },
   statDivider: { width: 1, height: 28 },
-
-  // health card
   healthCard: {
     borderRadius: BorderRadius.xl,
     padding: Spacing.base,
+    gap: Spacing.sm,
   },
-  healthTitle: {
-    fontSize: 10, fontWeight: '700', letterSpacing: 1.2,
-    marginBottom: Spacing.sm,
+  sectionTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
   },
-  healthRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
-  healthItem: { alignItems: 'center', gap: 2 },
-  healthVal: { fontSize: Typography.fontSize.base, fontWeight: '800' },
-  healthUnit: { fontSize: Typography.fontSize.xs, fontWeight: '600' },
-  healthLbl: { fontSize: 10, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-
-  // nudge / complete profile banner
-  nudgeCard: {
+  healthGrid: {
     flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  healthTile: {
+    flex: 1,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
     alignItems: 'center',
-    gap: Spacing.md,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.base,
+    justifyContent: 'center',
+    minHeight: 76,
   },
-  nudgeIcon: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    alignItems: 'center', justifyContent: 'center',
+  healthValue: {
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '800',
+    textAlign: 'center',
   },
-  nudgeTitle: { color: '#FFF', fontSize: Typography.fontSize.base, fontWeight: '800' },
-  nudgeSub: { color: 'rgba(255,255,255,0.82)', fontSize: Typography.fontSize.xs, marginTop: 1 },
-
-  // grouped menu
+  healthLabel: {
+    marginTop: 4,
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
   group: { gap: 6 },
   groupLabel: {
-    fontSize: 10, fontWeight: '700', letterSpacing: 1.4,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
     marginLeft: 4,
   },
   groupCard: { borderRadius: BorderRadius.xl, overflow: 'hidden' },
-  recipeActionsCard: {
+  actionCard: {
     borderRadius: BorderRadius.xl,
     padding: Spacing.sm,
     gap: Spacing.sm,
   },
-  recipeActionBtn: {
+  actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.sm,
-    paddingVertical: 12,
     borderRadius: BorderRadius.lg,
+    paddingVertical: 12,
   },
-  recipeActionText: {
+  actionText: {
     fontSize: Typography.fontSize.base,
     fontWeight: '700',
   },
   menuRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 14, paddingHorizontal: Spacing.base,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.base,
     gap: Spacing.md,
   },
   menuIcon: {
-    width: 36, height: 36, borderRadius: BorderRadius.md,
-    alignItems: 'center', justifyContent: 'center',
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   menuLabel: { flex: 1, fontSize: Typography.fontSize.base, fontWeight: '600' },
   badge: {
-    minWidth: 20, height: 20, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center',
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 5,
   },
   badgeText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
   rowDivider: { height: StyleSheet.hairlineWidth, marginHorizontal: Spacing.base },
-
-  // logout
   logoutBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: Spacing.sm, borderRadius: BorderRadius.xl,
-    paddingVertical: 14, borderWidth: 1.5, marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    borderRadius: BorderRadius.xl,
+    paddingVertical: 14,
+    borderWidth: 1.5,
+    marginTop: 4,
   },
   logoutTxt: { fontSize: Typography.fontSize.base, fontWeight: '700' },
-
   version: { textAlign: 'center', fontSize: Typography.fontSize.xs, paddingBottom: 4 },
 });

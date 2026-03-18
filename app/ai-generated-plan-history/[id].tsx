@@ -29,6 +29,12 @@ import { FallbackImage } from '../../src/components/FallbackImage';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const PAGE_SIZE = 20;
+const MEAL_COLORS: Record<string, string> = {
+  Breakfast: '#F59E0B',
+  Lunch: '#22C55E',
+  Snack: '#8B5CF6',
+  Dinner: '#3B82F6',
+};
 
 function StaggeredEntry({
   delay,
@@ -350,14 +356,23 @@ export default function AiGeneratedPlanDetailScreen() {
             <Text style={[styles.summaryTitle, isCompact && styles.summaryTitleCompact, { color: colors.text }]}>{plan.title}</Text>
             <Text style={[styles.summaryLine, { color: colors.textSecondary }]}>Created: {toPrettyDate(plan.created_at)}</Text>
             <Text style={[styles.summaryLine, { color: colors.textSecondary }]}>Goal: {plan.goal?.replace(/_/g, ' ') || 'custom'}</Text>
-            <Text style={[styles.summaryLine, { color: colors.textSecondary }]}>Calories: {plan.total_calories} kcal · Protein: {plan.total_protein} g</Text>
+            <View style={styles.nutritionRow}>
+              <View style={[styles.nutritionPill, { backgroundColor: colors.accent + '16', borderColor: colors.accent + '55' }]}>
+                <Text style={[styles.nutritionLabel, { color: colors.accent }]}>Calories</Text>
+                <Text style={[styles.nutritionValue, { color: colors.accent }]}>{plan.total_calories} kcal</Text>
+              </View>
+              <View style={[styles.nutritionPill, { backgroundColor: '#3B82F615', borderColor: '#3B82F655' }]}>
+                <Text style={[styles.nutritionLabel, { color: '#3B82F6' }]}>Protein</Text>
+                <Text style={[styles.nutritionValue, { color: '#3B82F6' }]}>{plan.total_protein} g</Text>
+              </View>
+            </View>
             <View style={[styles.breakdownRow, { backgroundColor: colors.background }]}> 
               <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>Match Source Breakdown</Text>
-              <Text style={[styles.breakdownValue, { color: colors.text }]}>Master {sourceBreakdown.master}</Text>
+              <Text style={[styles.breakdownValue, { color: '#22C55E' }]}>Master {sourceBreakdown.master}</Text>
               <Text style={[styles.breakdownDot, { color: colors.textTertiary }]}>·</Text>
-              <Text style={[styles.breakdownValue, { color: colors.text }]}>AI {sourceBreakdown.ai}</Text>
+              <Text style={[styles.breakdownValue, { color: colors.accent }]}>AI {sourceBreakdown.ai}</Text>
               <Text style={[styles.breakdownDot, { color: colors.textTertiary }]}>·</Text>
-              <Text style={[styles.breakdownValue, { color: colors.text }]}>Total {sourceBreakdown.total}</Text>
+              <Text style={[styles.breakdownValue, { color: '#8B5CF6' }]}>Total {sourceBreakdown.total}</Text>
             </View>
           </View>
 
@@ -395,7 +410,7 @@ export default function AiGeneratedPlanDetailScreen() {
                     >
                       <FallbackImage uri={recipe?.image ?? ''} style={styles.thumb} resizeMode="cover" />
                       <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={[styles.mealType, { color: colors.textTertiary }]}>{meal.meal_type}</Text>
+                        <Text style={[styles.mealType, { color: MEAL_COLORS[meal.meal_type] ?? colors.accent }]}>{meal.meal_type}</Text>
                         <Text style={[styles.mealName, isCompact && styles.mealNameCompact, { color: colors.text }]} numberOfLines={2}>
                           {recipe?.name ?? 'Recipe unavailable'}
                         </Text>
@@ -420,7 +435,7 @@ export default function AiGeneratedPlanDetailScreen() {
                   {dayGroup.entries.map((entry) => (
                     <View key={entry.key} style={[styles.cloudMealRow, { borderTopColor: colors.border }]}> 
                       <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={[styles.mealType, { color: colors.textTertiary }]}>{entry.mealType}</Text>
+                        <Text style={[styles.mealType, { color: MEAL_COLORS[entry.mealType] ?? colors.accent }]}>{entry.mealType}</Text>
                         <Text style={[styles.mealName, isCompact && styles.mealNameCompact, { color: colors.text }]}>{entry.recipeName}</Text>
                         <Text style={[styles.mealMeta, isCompact && styles.mealMetaCompact, { color: colors.textSecondary }]}>{entry.quantity}</Text>
                       </View>
@@ -537,6 +552,27 @@ const styles = StyleSheet.create({
   },
   summaryLine: {
     fontSize: Typography.fontSize.sm,
+  },
+  nutritionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  nutritionPill: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  nutritionLabel: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
+  },
+  nutritionValue: {
+    marginTop: 2,
+    fontSize: Typography.fontSize.sm,
+    fontWeight: '800',
   },
   breakdownRow: {
     marginTop: 6,

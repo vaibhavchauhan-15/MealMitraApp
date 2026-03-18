@@ -29,6 +29,9 @@ export interface Recipe {
   id: string;
   name: string;
   source?: 'app' | 'user_upload' | 'ai';
+  uploadedBy?: string | null;
+  uploadedByName?: string | null;
+  uploadedByUsername?: string | null;
   cuisine: string;
   diet: 'Vegetarian' | 'Non-Vegetarian' | 'Vegan' | 'Eggetarian';
   difficulty: 'Easy' | 'Medium' | 'Hard';
@@ -47,6 +50,9 @@ export interface Recipe {
   steps: CookingStep[];
   tips: string[];
   tags: string[];
+  likesCount?: number;
+  dislikesCount?: number;
+  commentsCount?: number;
 }
 
 export type RecipeSource = 'master' | 'ai';
@@ -202,6 +208,17 @@ export interface DbRecipeRow {
   id: string;
   recipe_slug?: string | null;
   uploaded_by?: string | null;
+  user_id?: string | null;
+  user_profiles?:
+    | {
+        name?: string | null;
+        username?: string | null;
+      }
+    | Array<{
+        name?: string | null;
+        username?: string | null;
+      }>
+    | null;
   source?: 'app' | 'user_upload' | 'ai';
   title: string;
   description?: string;
@@ -298,10 +315,19 @@ export function mapDbToRecipe(row: DbRecipeRow): Recipe {
     ? row.steps
     : tryParseJsonArray(row.steps);
 
+  const profile = Array.isArray(row.user_profiles)
+    ? row.user_profiles[0]
+    : row.user_profiles;
+
+  const uploadedBy = row.uploaded_by ?? row.user_id ?? null;
+
   return {
     id: row.id,
     name: row.title,
     source: row.source ?? 'app',
+    uploadedBy,
+    uploadedByName: profile?.name ?? null,
+    uploadedByUsername: profile?.username ?? null,
     cuisine: row.cuisine ?? '',
     diet: (row.diet ?? 'Vegetarian') as Recipe['diet'],
     difficulty: (row.difficulty ?? 'Medium') as Recipe['difficulty'],

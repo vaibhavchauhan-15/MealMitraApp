@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   TouchableOpacity,
   View,
@@ -14,6 +14,7 @@ import { useTheme } from '../theme/useTheme';
 import { BorderRadius, Spacing, Typography, Shadow } from '../theme';
 import { useSavedStore } from '../store/savedStore';
 import { FallbackImage } from './FallbackImage';
+import { getRecipePublicCountersBatched } from '../services/recipeSocialService';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - Spacing.base * 2 - Spacing.md) / 2;
@@ -37,6 +38,34 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
   const saved = isSaved(recipe.id);
   const forcePlaceholder = Boolean(preferPlaceholderForAi && recipe.source === 'ai');
   const routeSource: 'master' | 'ai' = recipe.source === 'ai' ? 'ai' : 'master';
+  const [social, setSocial] = useState({ likesCount: recipe.likesCount ?? 0, commentsCount: recipe.commentsCount ?? 0 });
+
+  const isMealMitraAuthor = useMemo(() => {
+    if (!recipe.uploadedBy) return true;
+    return recipe.source === 'app';
+  }, [recipe.uploadedBy, recipe.source]);
+
+  const authorLabel = useMemo(() => {
+    if (isMealMitraAuthor) return 'MealMitra';
+    if (recipe.uploadedByUsername) return `@${recipe.uploadedByUsername}`;
+    return recipe.uploadedByName ?? 'Unknown User';
+  }, [isMealMitraAuthor, recipe.uploadedByName, recipe.uploadedByUsername]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRecipePublicCountersBatched(recipe.id, routeSource)
+      .then((snapshot) => {
+        if (cancelled) return;
+        setSocial({ likesCount: snapshot.likesCount, commentsCount: snapshot.commentsCount });
+      })
+      .catch(() => {
+        // Best-effort social metadata for cards.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [recipe.id, routeSource]);
 
   const dietColor =
     recipe.diet === 'Vegetarian' || recipe.diet === 'Vegan'
@@ -72,12 +101,33 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
             {recipe.name}
           </Text>
           <View style={styles.row}>
+            <Ionicons name="person-outline" size={12} color={colors.textSecondary} />
+            {isMealMitraAuthor ? (
+              <Text style={[styles.author, { color: colors.textSecondary }]} numberOfLines={1}>
+                {authorLabel}
+              </Text>
+            ) : (
+              <TouchableOpacity onPress={() => router.push({ pathname: '/user/[id]', params: { id: recipe.uploadedBy! } } as any)}>
+                <Text style={[styles.authorLink, { color: colors.accent }]} numberOfLines={1}>
+                  {authorLabel}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <View style={styles.row}>
             <Ionicons name="star" size={12} color={colors.starFilled} />
             <Text style={[styles.rating, { color: colors.text }]}> {recipe.rating}</Text>
             <Text style={[styles.metaDivider, { color: colors.textTertiary }]}>•</Text>
             <Text style={[styles.meta, { color: colors.textTertiary }]}>{recipe.cook_time} min</Text>
             <Text style={[styles.metaDivider, { color: colors.textTertiary }]}>•</Text>
             <Text style={[styles.meta, { color: colors.textTertiary }]}>{recipe.calories} kcal</Text>
+          </View>
+          <View style={styles.row}>
+            <Ionicons name="heart-outline" size={12} color={colors.textSecondary} />
+            <Text style={[styles.meta, { color: colors.textTertiary }]}>{social.likesCount}</Text>
+            <Text style={[styles.metaDivider, { color: colors.textTertiary }]}>•</Text>
+            <Ionicons name="chatbubble-outline" size={12} color={colors.textSecondary} />
+            <Text style={[styles.meta, { color: colors.textTertiary }]}>{social.commentsCount}</Text>
           </View>
         </View>
         <TouchableOpacity
@@ -134,6 +184,20 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
           {recipe.name}
         </Text>
         <View style={styles.row}>
+          <Ionicons name="person-outline" size={12} color={colors.textSecondary} />
+          {isMealMitraAuthor ? (
+            <Text style={[styles.author, { color: colors.textSecondary }]} numberOfLines={1}>
+              {authorLabel}
+            </Text>
+          ) : (
+            <TouchableOpacity onPress={() => router.push({ pathname: '/user/[id]', params: { id: recipe.uploadedBy! } } as any)}>
+              <Text style={[styles.authorLink, { color: colors.accent }]} numberOfLines={1}>
+                {authorLabel}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={styles.row}>
           <Ionicons name="star" size={12} color={colors.starFilled} />
           <Text style={[styles.rating, { color: colors.text }]}> {recipe.rating}</Text>
           <Text style={[styles.metaDivider, { color: colors.textTertiary }]}>•</Text>
@@ -141,6 +205,13 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
           <Text style={[styles.cuisine, { color: colors.textSecondary }]} numberOfLines={1}>
             {recipe.cuisine}
           </Text>
+        </View>
+        <View style={styles.row}>
+          <Ionicons name="heart-outline" size={12} color={colors.textSecondary} />
+          <Text style={[styles.meta, { color: colors.textTertiary }]}>{social.likesCount}</Text>
+          <Text style={[styles.metaDivider, { color: colors.textTertiary }]}>•</Text>
+          <Ionicons name="chatbubble-outline" size={12} color={colors.textSecondary} />
+          <Text style={[styles.meta, { color: colors.textTertiary }]}>{social.commentsCount}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -222,6 +293,14 @@ const styles = StyleSheet.create({
   cuisine: {
     fontSize: Typography.fontSize.xs,
     fontWeight: '500',
+  },
+  author: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '500',
+  },
+  authorLink: {
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '700',
   },
   name: {
     fontSize: Typography.fontSize.base,

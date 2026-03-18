@@ -63,12 +63,12 @@ export async function canonicalizeIngredients(ingredients: string[]): Promise<st
 /** Lightweight columns for list/card views (no heavy JSONB blobs) */
 export const LIST_COLS =
   'id,recipe_slug,title,description,cuisine,diet,difficulty,cook_time,prep_time,servings,calories,' +
-  'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,source';
+  'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,source,uploaded_by,user_profiles:uploaded_by(name,username)';
 
 /** Full columns for detail / cooking screens */
 export const FULL_COLS =
   'id,recipe_slug,title,description,cuisine,diet,difficulty,cook_time,prep_time,servings,calories,' +
-  'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps,ingredient_fts,fts_vector,source,uploaded_by';
+  'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps,ingredient_fts,fts_vector,source,uploaded_by,user_profiles:uploaded_by(name,username)';
 
 // ─── Base query helper ────────────────────────────────────────────────────────
 
@@ -267,7 +267,7 @@ export async function getAIRecipeByIdFromDb(id: string): Promise<Recipe | null> 
       .from('user_ai_generated_recipes')
       .select(
         'id,title,description,cuisine,diet,difficulty,cook_time,prep_time,servings,calories,' +
-        'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps'
+        'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps,user_id,user_profiles!user_ai_generated_recipes_user_id_fkey(name,username)'
       )
       .eq('id', id)
       .single();
@@ -429,6 +429,9 @@ export async function searchRecipesByIngredients(
   ingredients: string[],
   options?: { diet?: string; cuisine?: string; maxTime?: number; limit?: number },
 ): Promise<IngredientMatchResult[]> {
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const excludeUserId = authUser?.id ?? '';
+
   const canonicalIngredients = Array.from(
     new Set((await canonicalizeIngredients(ingredients)).map(normalizeIngredientToken).filter(Boolean))
   );
@@ -441,6 +444,7 @@ export async function searchRecipesByIngredients(
     options?.cuisine ?? '',
     typeof options?.maxTime === 'number' ? options.maxTime : '',
     typeof options?.limit === 'number' ? options.limit : '',
+    excludeUserId,
   ].join(':');
 
   return getCachedOrFetch(cacheKey, 1000 * 60 * 6, async () => {
@@ -459,9 +463,13 @@ export async function searchRecipesByIngredients(
     .select(
       'id,title,description,cuisine,diet,difficulty,cook_time,prep_time,servings,calories,' +
       'protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,created_at,' +
-      'user_profiles:user_id(name)'
+      'user_id,user_profiles!user_ai_generated_recipes_user_id_fkey(name)'
     )
     .eq('is_public', true);
+
+  if (excludeUserId) {
+    aiQuery = aiQuery.neq('user_id', excludeUserId);
+  }
 
   if (options?.diet) {
     masterQuery = masterQuery.eq('diet', options.diet);
@@ -544,6 +552,8 @@ export async function searchRecipesByIngredients(
       recipe: mapDbToRecipe({
         id: row.id,
         source: 'ai',
+        user_id: row.user_id,
+        user_profiles: row.user_profiles,
         title: row.title,
         description: row.description,
         cuisine: row.cuisine,
@@ -581,4 +591,432 @@ export async function searchRecipesByIngredients(
 
   return out.slice(0, options?.limit ?? 20);
   });
+}
+
+export interface BrowseAiRecipeCard {
+  id: string;
+  title: string;
+  description: string | null;
+  cuisine: string | null;
+  diet: string | null;
+  difficulty: string | null;
+  cook_time: number | null;
+  calories: number | null;
+  image_url: string | null;
+  created_at: string;
+  created_by_name: string;
+}
+
+export interface BrowseAiRecipePage {
+  items: BrowseAiRecipeCard[];
+  hasMore: boolean;
+}
+
+export type BrowseSortOption = 'trending' | 'recently_active';
+
+export interface BrowsePublicUserCard {
+  id: string;
+  name: string;
+  username: string | null;
+  avatar_url: string | null;
+  avatar_icon: string | null;
+  cooking_level: string | null;
+  diet_preferences: string[];
+  recipe_count: number;
+  recent_recipe_at: string | null;
+}
+
+export interface BrowsePublicUserPage {
+  items: BrowsePublicUserCard[];
+  hasMore: boolean;
+}
+
+export type UserBrowseSortOption = 'trending' | 'a_z' | 'recent_uploader';
+
+function scoreAiRecipeTrend(
+  row: {
+    title?: string | null;
+    description?: string | null;
+    cuisine?: string | null;
+    created_at?: string | null;
+  },
+  query: string,
+): number {
+  const q = query.trim().toLowerCase();
+  const title = String(row.title ?? '').toLowerCase();
+  const description = String(row.description ?? '').toLowerCase();
+  const cuisine = String(row.cuisine ?? '').toLowerCase();
+
+  let score = 0;
+  if (q.length > 0) {
+    if (title === q) score += 120;
+    if (title.startsWith(q)) score += 80;
+    if (title.includes(q)) score += 50;
+    if (description.includes(q)) score += 24;
+    if (cuisine.includes(q)) score += 16;
+  }
+
+  const createdAtMs = row.created_at ? new Date(row.created_at).getTime() : 0;
+  if (Number.isFinite(createdAtMs) && createdAtMs > 0) {
+    const ageDays = Math.max(0, (Date.now() - createdAtMs) / (1000 * 60 * 60 * 24));
+    score += Math.max(0, 30 - ageDays * 0.35);
+  }
+
+  return score;
+}
+
+export async function getPublicAiRecipePage(options?: {
+  query?: string;
+  offset?: number;
+  limit?: number;
+  maxResults?: number;
+  sortBy?: BrowseSortOption;
+}): Promise<BrowseAiRecipePage> {
+  const offset = options?.offset ?? 0;
+  const limit = options?.limit ?? 16;
+  const maxResults = Math.max(1, Math.min(options?.maxResults ?? 30, 30));
+  const sortBy = options?.sortBy ?? 'trending';
+
+  if (offset >= maxResults) {
+    return { items: [], hasMore: false };
+  }
+
+  let query = supabase
+    .from('user_ai_generated_recipes')
+    .select(
+      'id,title,description,cuisine,diet,difficulty,cook_time,calories,image_url,created_at,user_profiles!user_ai_generated_recipes_user_id_fkey(name)'
+    )
+    .eq('is_public', true)
+    .order('created_at', { ascending: false });
+
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  if (authUser?.id) {
+    query = query.neq('user_id', authUser.id);
+  }
+
+  const term = options?.query?.trim();
+  if (term) {
+    query = query.or(`title.ilike.%${term}%,description.ilike.%${term}%,cuisine.ilike.%${term}%`);
+  }
+
+  const fetchPoolSize = Math.max(maxResults, offset + limit + 1);
+  const { data, error } = await query.limit(fetchPoolSize);
+  if (error) throw error;
+
+  const mapped = ((data ?? []) as any[]).map((row) => {
+    const profile = row.user_profiles as { name?: string } | { name?: string }[] | null;
+    const createdByName = Array.isArray(profile)
+      ? (profile[0]?.name ?? 'MealMitra User')
+      : (profile?.name ?? 'MealMitra User');
+
+    return {
+      id: String(row.id),
+      title: String(row.title ?? ''),
+      description: row.description ? String(row.description) : null,
+      cuisine: row.cuisine ? String(row.cuisine) : null,
+      diet: row.diet ? String(row.diet) : null,
+      difficulty: row.difficulty ? String(row.difficulty) : null,
+      cook_time: typeof row.cook_time === 'number' ? row.cook_time : null,
+      calories: typeof row.calories === 'number' ? row.calories : null,
+      image_url: row.image_url ? String(row.image_url) : null,
+      created_at: String(row.created_at ?? ''),
+      created_by_name: createdByName,
+    } as BrowseAiRecipeCard;
+  });
+
+  const sorted = [...mapped].sort((a, b) => {
+    if (sortBy === 'recently_active') {
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    }
+
+    const aScore = scoreAiRecipeTrend(a, term ?? '');
+    const bScore = scoreAiRecipeTrend(b, term ?? '');
+    if (aScore !== bScore) return bScore - aScore;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  const capped = sorted.slice(0, maxResults);
+  const pageItems = capped.slice(offset, offset + limit);
+
+  return {
+    items: pageItems,
+    hasMore: offset + limit < capped.length,
+  };
+}
+
+export async function getPublicUsersWithUploadsPage(options?: {
+  query?: string;
+  offset?: number;
+  limit?: number;
+  maxResults?: number;
+  dietPreference?: string;
+  cookingLevel?: string;
+  sortBy?: UserBrowseSortOption;
+}): Promise<BrowsePublicUserPage> {
+  const offset = options?.offset ?? 0;
+  const limit = options?.limit ?? 12;
+  const maxResults = Math.max(1, Math.min(options?.maxResults ?? 30, 30));
+  const sortBy = options?.sortBy ?? 'trending';
+
+  if (offset >= maxResults) {
+    return { items: [], hasMore: false };
+  }
+
+  const profileFetchLimit = Math.max(160, maxResults * 4);
+
+  let profileQuery = supabase
+    .from('user_profiles')
+    .select('id,name,username,avatar_url,avatar_icon,cooking_level,diet_preferences')
+    .limit(profileFetchLimit);
+
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  if (authUser?.id) {
+    profileQuery = profileQuery.neq('id', authUser.id);
+  }
+
+  const term = options?.query?.trim();
+  if (term) {
+    profileQuery = profileQuery.or(`name.ilike.%${term}%,username.ilike.%${term}%`);
+  }
+  if (options?.cookingLevel) {
+    profileQuery = profileQuery.eq('cooking_level', options.cookingLevel);
+  }
+  if (options?.dietPreference) {
+    profileQuery = profileQuery.contains('diet_preferences', [options.dietPreference]);
+  }
+
+  const { data: profileRows, error: profileError } = await profileQuery;
+  if (profileError) throw profileError;
+
+  const profiles = (profileRows ?? []) as any[];
+  const userIds = profiles.map((row) => String(row.id));
+  if (userIds.length === 0) {
+    return {
+      items: [],
+      hasMore: false,
+    };
+  }
+
+  const { data: uploadedRows, error: uploadedError } = await supabase
+    .from('master_recipes')
+    .select('uploaded_by,created_at')
+    .in('uploaded_by', userIds)
+    .eq('source', 'user_upload')
+    .eq('is_public', true)
+    .is('deleted_at', null)
+    .limit(6000);
+
+  if (uploadedError) throw uploadedError;
+
+  const { data: aiRecipeRows, error: aiRecipeError } = await supabase
+    .from('user_ai_generated_recipes')
+    .select('user_id,created_at')
+    .in('user_id', userIds)
+    .eq('is_public', true)
+    .limit(6000);
+
+  if (aiRecipeError) throw aiRecipeError;
+
+  const countByUser = new Map<string, number>();
+  const recentByUser = new Map<string, string>();
+  ((uploadedRows ?? []) as any[]).forEach((row) => {
+    const userId = String(row.uploaded_by ?? '');
+    if (!userId) return;
+    countByUser.set(userId, (countByUser.get(userId) ?? 0) + 1);
+
+    const createdAt = row.created_at ? String(row.created_at) : '';
+    if (createdAt) {
+      const prev = recentByUser.get(userId);
+      if (!prev || new Date(createdAt).getTime() > new Date(prev).getTime()) {
+        recentByUser.set(userId, createdAt);
+      }
+    }
+  });
+
+  ((aiRecipeRows ?? []) as any[]).forEach((row) => {
+    const userId = String(row.user_id ?? '');
+    if (!userId) return;
+    countByUser.set(userId, (countByUser.get(userId) ?? 0) + 1);
+
+    const createdAt = row.created_at ? String(row.created_at) : '';
+    if (createdAt) {
+      const prev = recentByUser.get(userId);
+      if (!prev || new Date(createdAt).getTime() > new Date(prev).getTime()) {
+        recentByUser.set(userId, createdAt);
+      }
+    }
+  });
+
+  const ranked = profiles
+    .map((row) => {
+      const id = String(row.id);
+      return {
+        id,
+        name: String(row.name ?? 'MealMitra User'),
+        username: row.username ? String(row.username) : null,
+        avatar_url: row.avatar_url ? String(row.avatar_url) : null,
+        avatar_icon: row.avatar_icon ? String(row.avatar_icon) : null,
+        cooking_level: row.cooking_level ? String(row.cooking_level) : null,
+        diet_preferences: Array.isArray(row.diet_preferences)
+          ? row.diet_preferences.map((value: unknown) => String(value))
+          : [],
+        recipe_count: countByUser.get(id) ?? 0,
+        recent_recipe_at: recentByUser.get(id) ?? null,
+      } as BrowsePublicUserCard;
+    })
+    .filter((item) => item.recipe_count > 0);
+
+  ranked.sort((a, b) => {
+    const aRecent = a.recent_recipe_at ? new Date(a.recent_recipe_at).getTime() : 0;
+    const bRecent = b.recent_recipe_at ? new Date(b.recent_recipe_at).getTime() : 0;
+
+    if (sortBy === 'a_z') {
+      return a.name.localeCompare(b.name);
+    }
+
+    if (sortBy === 'recent_uploader') {
+      if (aRecent !== bRecent) return bRecent - aRecent;
+      if (a.recipe_count !== b.recipe_count) return b.recipe_count - a.recipe_count;
+      return a.name.localeCompare(b.name);
+    }
+
+    if (a.recipe_count !== b.recipe_count) return b.recipe_count - a.recipe_count;
+    if (aRecent !== bRecent) return bRecent - aRecent;
+    return a.name.localeCompare(b.name);
+  });
+
+  const capped = ranked.slice(0, maxResults);
+  return {
+    items: capped.slice(offset, offset + limit),
+    hasMore: offset + limit < capped.length,
+  };
+}
+
+export async function getPublicUserUploadedRecipes(userId: string): Promise<Recipe[]> {
+  const [masterResp, aiResp] = await Promise.all([
+    supabase
+      .from('master_recipes')
+      .select(LIST_COLS)
+      .eq('uploaded_by', userId)
+      .eq('source', 'user_upload')
+      .eq('is_public', true)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(250),
+    supabase
+      .from('user_ai_generated_recipes')
+      .select(
+        'id,title,description,cuisine,diet,difficulty,cook_time,prep_time,servings,calories,protein_g,carbs_g,fat_g,fiber_g,sugar_g,image_url,tags,ingredients,steps,created_at,user_id,user_profiles!user_ai_generated_recipes_user_id_fkey(name,username)'
+      )
+      .eq('user_id', userId)
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .limit(250),
+  ]);
+
+  if (masterResp.error) throw masterResp.error;
+  if (aiResp.error) throw aiResp.error;
+
+  const merged = [
+    ...((masterResp.data ?? []) as any[]).map((row) => ({
+      createdAt: row.created_at ? String(row.created_at) : '',
+      recipe: mapDbToRecipe(toDbRecipeRow(row)),
+    })),
+    ...((aiResp.data ?? []) as any[]).map((row) => ({
+      createdAt: row.created_at ? String(row.created_at) : '',
+      recipe: mapDbToRecipe({
+        ...toDbRecipeRow(row),
+        source: 'ai',
+      }),
+    })),
+  ];
+
+  merged.sort((a, b) => {
+    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return bTime - aTime;
+  });
+
+  return merged.map((entry) => entry.recipe);
+}
+
+export async function getPublicUserProfile(userId: string): Promise<BrowsePublicUserCard | null> {
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('id,name,username,avatar_url,avatar_icon,cooking_level,diet_preferences')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const [masterCountResp, aiCountResp, masterRecentResp, aiRecentResp] = await Promise.all([
+    supabase
+      .from('master_recipes')
+      .select('*', { count: 'exact', head: true })
+      .eq('uploaded_by', userId)
+      .eq('source', 'user_upload')
+      .eq('is_public', true)
+      .is('deleted_at', null),
+    supabase
+      .from('user_ai_generated_recipes')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_public', true),
+    supabase
+      .from('master_recipes')
+      .select('created_at')
+      .eq('uploaded_by', userId)
+      .eq('source', 'user_upload')
+      .eq('is_public', true)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('user_ai_generated_recipes')
+      .select('created_at')
+      .eq('user_id', userId)
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (masterCountResp.error) throw masterCountResp.error;
+  if (aiCountResp.error) throw aiCountResp.error;
+  if (masterRecentResp.error) throw masterRecentResp.error;
+  if (aiRecentResp.error) throw aiRecentResp.error;
+
+  const masterCount = masterCountResp.count ?? 0;
+  const aiCount = aiCountResp.count ?? 0;
+  const masterRecent = masterRecentResp.data?.created_at
+    ? String(masterRecentResp.data.created_at)
+    : null;
+  const aiRecent = aiRecentResp.data?.created_at
+    ? String(aiRecentResp.data.created_at)
+    : null;
+
+  let recentRecipeAt: string | null = null;
+  if (masterRecent && aiRecent) {
+    recentRecipeAt = new Date(masterRecent).getTime() >= new Date(aiRecent).getTime()
+      ? masterRecent
+      : aiRecent;
+  } else {
+    recentRecipeAt = masterRecent ?? aiRecent;
+  }
+
+  return {
+    id: String(data.id),
+    name: String(data.name ?? 'MealMitra User'),
+    username: data.username ? String(data.username) : null,
+    avatar_url: data.avatar_url ? String(data.avatar_url) : null,
+    avatar_icon: data.avatar_icon ? String(data.avatar_icon) : null,
+    cooking_level: data.cooking_level ? String(data.cooking_level) : null,
+    diet_preferences: Array.isArray(data.diet_preferences)
+      ? data.diet_preferences.map((value: unknown) => String(value))
+      : [],
+    recipe_count: masterCount + aiCount,
+    recent_recipe_at: recentRecipeAt,
+  };
 }

@@ -41,6 +41,8 @@ import { usePlannerStore } from '../store/plannerStore';
 import { useRecipeStore } from '../store/recipeStore';
 import { useUserStore } from '../store/userStore';
 import { DayOfWeek, MealType, Recipe, UserHealthProfile } from '../types';
+import { getDailyNutritionTargets, getExceededTargetKeys, sumNutritionFromRecipes } from '../utils/plannerNutrition';
+import { getRecipeByIdFromSource } from '../services/searchService';
 import * as Crypto from 'expo-crypto';
 
 // diet preference string → DietType mapping
@@ -531,8 +533,8 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
   const isCompact = width <= 360 || height <= 720;
   const scrollRef = useRef<ScrollView>(null);
   const router = useRouter();
-  const { addMeal } = usePlannerStore();
-  const { addAiRecipes } = useRecipeStore();
+  const { addMeal, meals } = usePlannerStore();
+  const { addAiRecipes, getRecipeById } = useRecipeStore();
   const userProfile = useUserStore((s) => s.profile);
 
   const [step, setStep] = useState<Step>('form');
@@ -601,6 +603,65 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
     if (!plan) return null;
     return dailyPlans[previewDay] ?? plan;
   }, [dailyPlans, plan, previewDay]);
+  const nutritionTargets = useMemo(() => getDailyNutritionTargets(userProfile), [userProfile]);
+
+  const validateNutritionGuardrail = useCallback(async (
+    incomingSlots: Array<{ day: DayOfWeek; mealType: MealType; recipeId: string; recipeSource: 'master' | 'ai' }>
+  ) => {
+    if (!nutritionTargets) return { ok: true as const, message: '' };
+
+    const incomingByDay = new Map<DayOfWeek, typeof incomingSlots>();
+    incomingSlots.forEach((slot) => {
+      if (!incomingByDay.has(slot.day)) incomingByDay.set(slot.day, []);
+      incomingByDay.get(slot.day)!.push(slot);
+    });
+
+    const labelMap: Record<string, string> = {
+      calories: 'Calories',
+      protein: 'Protein',
+      carbs: 'Carbs',
+      fat: 'Fat',
+      fiber: 'Fiber',
+    };
+    const exceededByDay: string[] = [];
+
+    for (const [day, slots] of incomingByDay.entries()) {
+      const incomingSlotKeys = new Set(slots.map((slot) => `${slot.day}-${slot.mealType}`));
+      const existingForDay = meals.filter(
+        (entry) => entry.day === day && !incomingSlotKeys.has(`${entry.day}-${entry.mealType}`)
+      );
+      const existingRecipes = await Promise.all(
+        existingForDay.map(async (entry) => {
+          const cached = getRecipeById(entry.recipeId);
+          if (cached) return cached;
+          return getRecipeByIdFromSource(entry.recipeId, entry.recipeSource ?? 'master');
+        })
+      );
+
+      const incomingRecipes = await Promise.all(
+        slots.map(async (slot) => {
+          const cached = getRecipeById(slot.recipeId);
+          if (cached) return cached;
+          return getRecipeByIdFromSource(slot.recipeId, slot.recipeSource);
+        })
+      );
+
+      const totals = sumNutritionFromRecipes([...existingRecipes, ...incomingRecipes]);
+      const exceeded = getExceededTargetKeys(totals, nutritionTargets);
+      if (exceeded.length > 0) {
+        exceededByDay.push(`${day} (${exceeded.map((k) => labelMap[k]).join(', ')})`);
+      }
+    }
+
+    if (exceededByDay.length > 0) {
+      return {
+        ok: false as const,
+        message: `This plan exceeds your daily target on: ${exceededByDay.join(' · ')}`,
+      };
+    }
+
+    return { ok: true as const, message: '' };
+  }, [getRecipeById, meals, nutritionTargets]);
 
   const generatePlansForDays = useCallback(
     async (fitnessProfile: UserFitnessProfile, selected: DayOfWeek[]) => {
@@ -842,6 +903,33 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
         }
       });
 
+      const pendingPublicSlots: Array<{ day: DayOfWeek; mealType: MealType; recipeId: string; recipeSource: 'master' | 'ai' }> = [];
+
+      selectedDays.forEach((day) => {
+        (['Breakfast', 'Lunch', 'Snack', 'Dinner'] as MealType[]).forEach((mealType) => {
+          const mapped = mealByType.get(mealType);
+          if (!mapped) return;
+          pendingPublicSlots.push({
+            day,
+            mealType,
+            recipeId: mapped.recipe_id,
+            recipeSource: (mapped.recipe_source ?? 'master') as 'master' | 'ai',
+          });
+        });
+      });
+
+      const guard = await validateNutritionGuardrail(pendingPublicSlots);
+      if (!guard.ok) {
+        setUploadDialog({
+          visible: true,
+          title: 'Target Exceeded',
+          message: guard.message,
+          icon: 'alert-circle',
+          iconColor: '#EF4444',
+        });
+        return;
+      }
+
       selectedDays.forEach((day) => {
         (['Breakfast', 'Lunch', 'Snack', 'Dinner'] as MealType[]).forEach((mealType) => {
           const mapped = mealByType.get(mealType);
@@ -950,6 +1038,33 @@ export function AiDietPlannerModal({ visible, onClose }: Props) {
         usedMealNames.add(normalizeMealName(fallbackItem.name));
         aiPlannerPairs.push({ recipe, day, mealType });
       }
+    }
+
+    const pendingGeneratedSlots: Array<{ day: DayOfWeek; mealType: MealType; recipeId: string; recipeSource: 'master' | 'ai' }> = [
+      ...planMeals.map((m) => ({
+        day: m.day,
+        mealType: m.mealType,
+        recipeId: m.recipeId,
+        recipeSource: (m.recipeSource ?? 'master') as 'master' | 'ai',
+      })),
+      ...aiPlannerPairs.map((p) => ({
+        day: p.day,
+        mealType: p.mealType,
+        recipeId: p.recipe.id,
+        recipeSource: 'ai' as const,
+      })),
+    ];
+
+    const guard = await validateNutritionGuardrail(pendingGeneratedSlots);
+    if (!guard.ok) {
+      setUploadDialog({
+        visible: true,
+        title: 'Target Exceeded',
+        message: guard.message,
+        icon: 'alert-circle',
+        iconColor: '#EF4444',
+      });
+      return;
     }
 
     // Insert only fallback AI recipes into user_ai_generated_recipes first.
