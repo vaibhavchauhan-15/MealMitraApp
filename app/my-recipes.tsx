@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius } from '../src/theme';
@@ -132,6 +132,7 @@ export default function MyRecipesScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ editRecipeId?: string | string[] }>();
   const profile = useUserStore((s) => s.profile);
   const ingredientInputRefs = useRef<Record<string, TextInput | null>>({});
   const stepInputRefs = useRef<Record<string, TextInput | null>>({});
@@ -147,9 +148,16 @@ export default function MyRecipesScreen() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const { toast, showToast } = useToast();
+  const autoOpenedEditRef = useRef(false);
+
+  const editRecipeIdParam = useMemo(() => {
+    if (Array.isArray(params.editRecipeId)) return params.editRecipeId[0];
+    return params.editRecipeId;
+  }, [params.editRecipeId]);
 
   useEffect(() => {
-    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    const isNewArchitecture = (globalThis as any).nativeFabricUIManager != null;
+    if (Platform.OS === 'android' && !isNewArchitecture && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
 
@@ -243,6 +251,18 @@ export default function MyRecipesScreen() {
       },
     });
   }, []);
+
+  useEffect(() => {
+    if (!editRecipeIdParam || autoOpenedEditRef.current || loading || items.length === 0) {
+      return;
+    }
+
+    const target = items.find((item) => item.recipe.id === editRecipeIdParam);
+    if (!target) return;
+
+    openEdit(target);
+    autoOpenedEditRef.current = true;
+  }, [editRecipeIdParam, items, loading, openEdit]);
 
   const addIngredientRow = useCallback(() => {
     const row = createIngredientRow();

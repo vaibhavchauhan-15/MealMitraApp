@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { useColorScheme, View, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../src/theme';
+import { useInteractionNotificationStore } from '../../src/store/interactionNotificationStore';
 
 type TabIconProps = {
   name: React.ComponentProps<typeof Ionicons>['name'];
@@ -11,7 +12,7 @@ type TabIconProps = {
 
 function TabIcon({ name, color, focused }: TabIconProps) {
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: -3 }}>
       <Ionicons name={name} size={24} color={color} />
     </View>
   );
@@ -21,6 +22,7 @@ export default function TabLayout() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
+  const unreadNotificationCount = useInteractionNotificationStore((s) => s.unreadCount);
 
   return (
     <Tabs
@@ -30,15 +32,19 @@ export default function TabLayout() {
           backgroundColor: colors.tabBar,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 82 : 62,
-          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
-          paddingTop: 8,
+          height: Platform.OS === 'ios' ? 88 : 78,
+          paddingBottom: Platform.OS === 'ios' ? 24 : 18,
+          paddingTop: 10,
+        },
+        tabBarItemStyle: {
+          paddingTop: 1,
         },
         tabBarActiveTintColor: colors.tabBarActive,
         tabBarInactiveTintColor: colors.tabBarInactive,
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: '600',
+          marginBottom: 3,
         },
       }}
     >
@@ -76,6 +82,20 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name={focused ? 'calendar' : 'calendar-outline'} color={color} focused={focused} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: 'Notifications',
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name={focused ? 'notifications' : 'notifications-outline'}
+              color={color}
+              focused={focused}
+            />
+          ),
+          tabBarBadge: unreadNotificationCount > 0 ? (unreadNotificationCount > 99 ? '99+' : unreadNotificationCount) : undefined,
         }}
       />
       <Tabs.Screen

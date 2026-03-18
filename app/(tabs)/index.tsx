@@ -27,7 +27,6 @@ import {
 } from '../../src/services/searchService';
 import { useUserStore } from '../../src/store/userStore';
 import { useRecipeStore } from '../../src/store/recipeStore';
-import { useInteractionNotificationStore } from '../../src/store/interactionNotificationStore';
 import { Recipe } from '../../src/types';
 
 export default function HomeScreen() {
@@ -36,7 +35,6 @@ export default function HomeScreen() {
   const router = useRouter();
   const profile = useUserStore((s) => s.profile);
   const syncUserFromSupabase = useUserStore((s) => s.syncFromSupabase);
-  const unreadNotificationCount = useInteractionNotificationStore((s) => s.unreadCount);
 
   const {
     featured, trending, quick, totalCount, initialLoaded, loadInitialData, addToCache, syncAiRecipesFromSupabase,
@@ -174,17 +172,6 @@ export default function HomeScreen() {
             <Text style={[styles.headerTitle, { color: colors.text }]}>Trending today</Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={[styles.notifBtn, { backgroundColor: colors.surface }]}
-          onPress={() => router.push('/notifications' as any)}
-        >
-          <Ionicons name="notifications-outline" size={22} color={colors.text} />
-          {unreadNotificationCount > 0 ? (
-            <View style={[styles.notifBadge, { backgroundColor: colors.error }]}>
-              <Text style={styles.notifBadgeText}>{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</Text>
-            </View>
-          ) : null}
-        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -350,32 +337,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.lg,
     fontWeight: '700',
     lineHeight: 24,
-  },
-  notifBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    marginTop: 4,
-  notifBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  notifBadgeText: {
-    color: '#FFFFFF',
-    fontSize: Typography.fontSize.xs,
-    fontWeight: '800',
-    lineHeight: 14,
-  },
   },
   scrollContent: {
     paddingHorizontal: Spacing.base,

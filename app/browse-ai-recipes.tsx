@@ -49,7 +49,8 @@ export default function BrowseAiRecipesScreen() {
   } = useLocalRecentSearches('recent_ai_recipe_searches');
 
   useEffect(() => {
-    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    const isNewArchitecture = (globalThis as any).nativeFabricUIManager != null;
+    if (Platform.OS === 'android' && !isNewArchitecture && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);

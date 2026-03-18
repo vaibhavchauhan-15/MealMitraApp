@@ -85,6 +85,11 @@ export default function RecipeDetailScreen() {
   const pulse = useRef(new Animated.Value(1)).current;
   const socialRefreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const isCurrentUsersRecipe = useMemo(() => {
+    if (!currentUserId || !recipe?.uploadedBy) return false;
+    return String(currentUserId) === String(recipe.uploadedBy);
+  }, [currentUserId, recipe?.uploadedBy]);
+
   const isMealMitraAuthor = useMemo(() => {
     if (!recipe?.uploadedBy) return true;
     return recipe.source === 'app';
@@ -92,10 +97,11 @@ export default function RecipeDetailScreen() {
 
   const authorLabel = useMemo(() => {
     if (!recipe) return 'MealMitra';
+    if (isCurrentUsersRecipe) return 'You';
     if (isMealMitraAuthor) return 'MealMitra';
     if (recipe.uploadedByUsername) return `@${recipe.uploadedByUsername}`;
     return recipe.uploadedByName ?? 'Unknown User';
-  }, [isMealMitraAuthor, recipe]);
+  }, [isCurrentUsersRecipe, isMealMitraAuthor, recipe]);
 
   const refreshSocial = useCallback(async () => {
     if (!id) return;
@@ -491,7 +497,7 @@ export default function RecipeDetailScreen() {
             <Text style={[styles.recipeName, { color: colors.text }]}>{recipe.name}</Text>
             <View style={styles.authorRow}>
               <Ionicons name="person-outline" size={14} color={colors.textSecondary} />
-              {isMealMitraAuthor ? (
+              {isMealMitraAuthor || isCurrentUsersRecipe ? (
                 <Text style={[styles.authorText, { color: colors.textSecondary }]}>{authorLabel}</Text>
               ) : (
                 <TouchableOpacity onPress={() => router.push({ pathname: '/user/[id]', params: { id: recipe.uploadedBy! } } as any)}>

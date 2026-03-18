@@ -14,20 +14,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { useTheme } from '../src/theme/useTheme';
-import { BorderRadius, Shadow, Spacing, Typography } from '../src/theme';
+import { useTheme } from '../../src/theme/useTheme';
+import { BorderRadius, Shadow, Spacing, Typography } from '../../src/theme';
 import {
   fetchInteractionNotificationsPage,
   markAllInteractionNotificationsRead,
   markInteractionNotificationRead,
   markInteractionNotificationsRead,
-} from '../src/services/interactionNotificationService';
+} from '../../src/services/interactionNotificationService';
 import {
   InteractionNotification,
   useInteractionNotificationStore,
-} from '../src/store/interactionNotificationStore';
-import { FallbackImage } from '../src/components/FallbackImage';
-import { NotificationSkeletonList } from '../src/components/notifications/NotificationSkeletonList';
+} from '../../src/store/interactionNotificationStore';
+import { FallbackImage } from '../../src/components/FallbackImage';
+import { NotificationSkeletonList } from '../../src/components/notifications/NotificationSkeletonList';
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const PRIORITY_BY_TYPE: Record<InteractionNotification['type'], number> = {

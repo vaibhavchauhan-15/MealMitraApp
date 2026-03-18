@@ -15,7 +15,6 @@ import {
   startInteractionNotificationBridge,
   stopInteractionNotificationBridge,
 } from '../src/services/interactionNotificationService';
-import { GlobalNotificationBell } from '../src/components/notifications/GlobalNotificationBell';
 import { Toast } from '../src/components/Toast';
 import { useInteractionNotificationStore } from '../src/store/interactionNotificationStore';
 import { useToast } from '../src/hooks/useToast';
@@ -246,7 +245,6 @@ export default function RootLayout() {
         <Stack.Screen name="browse-users" />
         <Stack.Screen name="user/[id]" />
         <Stack.Screen name="public-ai-plan/[id]" />
-        <Stack.Screen name="notifications" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="change-username" />
         <Stack.Screen name="change-password" />
@@ -255,7 +253,6 @@ export default function RootLayout() {
         <Stack.Screen name="privacy" />
       </Stack>
 
-      <GlobalNotificationBell />
       <Toast visible={toast.visible} message={toast.message} type={toast.type} title={toast.title} />
     </>
   );

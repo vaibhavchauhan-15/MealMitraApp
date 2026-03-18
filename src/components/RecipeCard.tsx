@@ -13,6 +13,7 @@ import { Recipe } from '../types';
 import { useTheme } from '../theme/useTheme';
 import { BorderRadius, Spacing, Typography, Shadow } from '../theme';
 import { useSavedStore } from '../store/savedStore';
+import { useUserStore } from '../store/userStore';
 import { FallbackImage } from './FallbackImage';
 import { getRecipePublicCountersBatched } from '../services/recipeSocialService';
 
@@ -24,6 +25,13 @@ interface RecipeCardProps {
   style?: object;
   horizontal?: boolean;
   preferPlaceholderForAi?: boolean;
+  horizontalActions?: {
+    key: string;
+    icon: string;
+    onPress: () => void;
+    color?: string;
+    disabled?: boolean;
+  }[];
 }
 
 export const RecipeCard: React.FC<RecipeCardProps> = ({
@@ -31,14 +39,21 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
   style,
   horizontal,
   preferPlaceholderForAi,
+  horizontalActions,
 }) => {
   const { colors } = useTheme();
   const router = useRouter();
   const { toggleSaved, isSaved } = useSavedStore();
+  const currentUserId = useUserStore((s) => s.profile?.id ?? null);
   const saved = isSaved(recipe.id);
   const forcePlaceholder = Boolean(preferPlaceholderForAi && recipe.source === 'ai');
   const routeSource: 'master' | 'ai' = recipe.source === 'ai' ? 'ai' : 'master';
   const [social, setSocial] = useState({ likesCount: recipe.likesCount ?? 0, commentsCount: recipe.commentsCount ?? 0 });
+
+  const isCurrentUsersRecipe = useMemo(() => {
+    if (!currentUserId || !recipe.uploadedBy) return false;
+    return String(currentUserId) === String(recipe.uploadedBy);
+  }, [currentUserId, recipe.uploadedBy]);
 
   const isMealMitraAuthor = useMemo(() => {
     if (!recipe.uploadedBy) return true;
@@ -46,10 +61,11 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
   }, [recipe.uploadedBy, recipe.source]);
 
   const authorLabel = useMemo(() => {
+    if (isCurrentUsersRecipe) return 'You';
     if (isMealMitraAuthor) return 'MealMitra';
     if (recipe.uploadedByUsername) return `@${recipe.uploadedByUsername}`;
     return recipe.uploadedByName ?? 'Unknown User';
-  }, [isMealMitraAuthor, recipe.uploadedByName, recipe.uploadedByUsername]);
+  }, [isCurrentUsersRecipe, isMealMitraAuthor, recipe.uploadedByName, recipe.uploadedByUsername]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,7 +118,7 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
           </Text>
           <View style={styles.row}>
             <Ionicons name="person-outline" size={12} color={colors.textSecondary} />
-            {isMealMitraAuthor ? (
+            {isMealMitraAuthor || isCurrentUsersRecipe ? (
               <Text style={[styles.author, { color: colors.textSecondary }]} numberOfLines={1}>
                 {authorLabel}
               </Text>
@@ -130,13 +146,44 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
             <Text style={[styles.meta, { color: colors.textTertiary }]}>{social.commentsCount}</Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={styles.saveBtn}
-          onPress={() => toggleSaved(recipe.id)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color={colors.accent} />
-        </TouchableOpacity>
+        <View style={styles.horizontalActions}>
+          {horizontalActions?.map((action) => (
+            <TouchableOpacity
+              key={action.key}
+              style={[
+                styles.horizontalActionBtn,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={action.onPress}
+              disabled={action.disabled}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={action.disabled ? 'time-outline' : (action.icon as any)}
+                size={18}
+                color={action.color ?? colors.textSecondary}
+              />
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            style={[
+              styles.horizontalActionBtn,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={() => toggleSaved(recipe.id)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.8}
+          >
+            <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={18} color={colors.accent} />
+          </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     );
   }
@@ -185,7 +232,7 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
         </Text>
         <View style={styles.row}>
           <Ionicons name="person-outline" size={12} color={colors.textSecondary} />
-          {isMealMitraAuthor ? (
+          {isMealMitraAuthor || isCurrentUsersRecipe ? (
             <Text style={[styles.author, { color: colors.textSecondary }]} numberOfLines={1}>
               {authorLabel}
             </Text>
@@ -344,7 +391,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 21,
   },
-  saveBtn: {
+  horizontalActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingRight: Spacing.md,
+  },
+  horizontalActionBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

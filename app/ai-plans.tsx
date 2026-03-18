@@ -198,7 +198,8 @@ export default function AiPlansScreen() {
   } = useLocalRecentSearches('recent_ai_diet_plan_searches');
 
   useEffect(() => {
-    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    const isNewArchitecture = (globalThis as any).nativeFabricUIManager != null;
+    if (Platform.OS === 'android' && !isNewArchitecture && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);

@@ -7,9 +7,6 @@ CREATE TABLE IF NOT EXISTS public.push_dispatch_queue (
   notification_id uuid NOT NULL REFERENCES public.user_notifications(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   payload jsonb NOT NULL,
-  response_status integer,
-  provider text,
-  response jsonb,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'failed', 'sent', 'dead')),
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   max_attempts integer NOT NULL DEFAULT 5 CHECK (max_attempts >= 1),
@@ -20,46 +17,14 @@ CREATE TABLE IF NOT EXISTS public.push_dispatch_queue (
   sent_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
-  visibility_timeout timestamptz,
-  CONSTRAINT push_payload_object_check CHECK (jsonb_typeof(payload) = 'object'),
   CONSTRAINT push_dispatch_queue_notification_unique UNIQUE (notification_id)
 );
-
-ALTER TABLE public.push_dispatch_queue
-ADD COLUMN IF NOT EXISTS response_status integer,
-ADD COLUMN IF NOT EXISTS provider text,
-ADD COLUMN IF NOT EXISTS response jsonb,
-ADD COLUMN IF NOT EXISTS visibility_timeout timestamptz;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'push_payload_object_check'
-      AND conrelid = 'public.push_dispatch_queue'::regclass
-  ) THEN
-    ALTER TABLE public.push_dispatch_queue
-    ADD CONSTRAINT push_payload_object_check
-    CHECK (jsonb_typeof(payload) = 'object');
-  END IF;
-END;
-$$;
 
 CREATE INDEX IF NOT EXISTS idx_push_dispatch_queue_status_next_attempt
 ON public.push_dispatch_queue(status, next_attempt_at, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_push_dispatch_queue_user_created
 ON public.push_dispatch_queue(user_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_push_dispatch_ready
-ON public.push_dispatch_queue(next_attempt_at, created_at)
-WHERE status IN ('pending', 'failed')
-  AND attempts < max_attempts;
-
-CREATE INDEX IF NOT EXISTS idx_push_dispatch_dead
-ON public.push_dispatch_queue(status)
-WHERE status = 'dead';
 
 CREATE OR REPLACE FUNCTION public.touch_push_dispatch_queue_updated_at()
 RETURNS trigger
@@ -148,13 +113,7 @@ BEGIN
   WITH picked AS (
     SELECT q.id
     FROM public.push_dispatch_queue q
-    WHERE (
-        q.status IN ('pending', 'failed')
-        OR (
-          q.status = 'processing'
-          AND q.locked_at < timezone('utc', now()) - interval '5 minutes'
-        )
-      )
+    WHERE q.status IN ('pending', 'failed')
       AND q.next_attempt_at <= timezone('utc', now())
       AND q.attempts < q.max_attempts
     ORDER BY q.next_attempt_at ASC, q.created_at ASC
@@ -202,7 +161,7 @@ BEGIN
     RETURN v_row;
   END IF;
 
-  SELECT LEAST(3600, 15 * (2 ^ LEAST(attempts, 5)))
+  SELECT LEAST(3600, 15 * (2 ^ LEAST(attempts, 7)))
   INTO v_retry_seconds
   FROM public.push_dispatch_queue
   WHERE id = p_job_id;

@@ -59,7 +59,8 @@ export default function BrowseUsersScreen() {
   } = useLocalRecentSearches('recent_user_browse_searches');
 
   useEffect(() => {
-    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    const isNewArchitecture = (globalThis as any).nativeFabricUIManager != null;
+    if (Platform.OS === 'android' && !isNewArchitecture && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);

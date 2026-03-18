@@ -153,12 +153,6 @@ Deno.serve(async (req) => {
           p_sent: false,
           p_error: `Could not load push tokens: ${tokenErr.message}`,
           p_retry_delay_seconds: 30,
-          p_response_status: 500,
-          p_provider: 'expo',
-          p_response: {
-            phase: 'load_tokens',
-            error: tokenErr.message,
-          },
         });
       }
       return json(500, { error: 'Could not load push tokens', claimed: claimed.length });
@@ -260,25 +254,11 @@ Deno.serve(async (req) => {
       const state = jobState.get(job.id) ?? { hasAnyToken: false, success: false, errors: ['Unknown job state'] };
       const sent = state.success;
       const errorText = state.errors.length ? state.errors.join('; ').slice(0, 1000) : null;
-      const responseStatus = sent ? (state.hasAnyToken ? 200 : 204) : 502;
-      const responsePayload = sent
-        ? {
-            phase: 'dispatch',
-            tokenDelivery: state.hasAnyToken ? 'sent' : 'no-active-tokens',
-            errorCount: state.errors.length,
-          }
-        : {
-            phase: 'dispatch',
-            errors: state.errors.slice(0, 20),
-          };
 
       const { error: finalizeErr } = await serviceClient.rpc('finalize_push_dispatch_job', {
         p_job_id: job.id,
         p_sent: sent,
         p_error: sent ? null : errorText,
-        p_response_status: responseStatus,
-        p_provider: 'expo',
-        p_response: responsePayload,
       });
 
       if (finalizeErr) {

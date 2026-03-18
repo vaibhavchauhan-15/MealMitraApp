@@ -76,6 +76,7 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView
+        style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing['2xl'] }]}
         showsVerticalScrollIndicator={false}
       >
@@ -123,19 +124,17 @@ export default function SettingsScreen() {
         <View style={[styles.section, { backgroundColor: colors.surface }]}>
           <SettingRow icon="person-outline" label="Edit Profile" onPress={() => router.push('/edit-profile' as any)} />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          <SettingRow icon="time-outline" label="Recently Viewed" onPress={() => router.push('/recently-viewed' as any)} />
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <SettingRow icon="at-outline" label="Change Username" onPress={() => router.push('/change-username' as any)} />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <SettingRow icon="mail-outline" label="Change Email" onPress={() => router.push('/change-email' as any)} />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <SettingRow icon="lock-closed-outline" label="Change Password" onPress={() => router.push('/change-password' as any)} />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          <SettingRow icon="help-circle-outline" label="Help & Support" onPress={() => router.push('/help' as any)} />
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <SettingRow icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => router.push('/privacy' as any)} />
-        </View>
-
-        {/* ── About ────────────────────────────────────────────────────────── */}
-        <SectionLabel label="About" />
-        <View style={[styles.section, { backgroundColor: colors.surface }]}>
-          <SettingRow icon="information-circle-outline" label="Version" value="1.0.0" />
         </View>
 
         <TouchableOpacity
@@ -146,6 +145,8 @@ export default function SettingsScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <Text style={[styles.versionFooter, { color: colors.textTertiary, paddingBottom: insets.bottom + 8 }]}>MealMitra v1.0.0</Text>
 
       <ConfirmModal
         visible={showLogoutModal}
@@ -169,6 +170,7 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  scroll: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -234,4 +236,9 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
   },
   logoutText: { color: '#FFF', fontWeight: '700', fontSize: Typography.fontSize.base },
+  versionFooter: {
+    textAlign: 'center',
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '500',
+  },
 });
