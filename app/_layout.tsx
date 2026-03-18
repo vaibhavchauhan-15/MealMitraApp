@@ -1,7 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { useColorScheme, Platform } from 'react-native';
 import { Colors } from '../src/theme';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
@@ -15,6 +15,10 @@ import {
   startInteractionNotificationBridge,
   stopInteractionNotificationBridge,
 } from '../src/services/interactionNotificationService';
+import { GlobalNotificationBell } from '../src/components/notifications/GlobalNotificationBell';
+import { Toast } from '../src/components/Toast';
+import { useInteractionNotificationStore } from '../src/store/interactionNotificationStore';
+import { useToast } from '../src/hooks/useToast';
 
 // expo-notifications remote push is not available in Expo Go (SDK 53+).
 // Load the module only when running in a real/dev build.
@@ -33,6 +37,15 @@ export default function RootLayout() {
   const syncRecentSearches = useRecipeStore((s) => s.syncRecentSearchesFromSupabase);
   const syncRecentlyViewed = useRecipeStore((s) => s.syncRecentlyViewedFromSupabase);
   const syncSaved = useSavedStore((s) => s.syncFromSupabase);
+  const incomingSequence = useInteractionNotificationStore((s) => s.incomingSequence);
+  const latestIncoming = useInteractionNotificationStore((s) => s.latestIncoming);
+  const clearLatestIncoming = useInteractionNotificationStore((s) => s.clearLatestIncoming);
+  const { toast, showToast } = useToast();
+
+  const latestIncomingMessage = useMemo(
+    () => latestIncoming?.message?.trim() ?? '',
+    [latestIncoming?.id, latestIncoming?.message]
+  );
 
   // Sync all Supabase-backed stores once on mount (session may already exist)
   useEffect(() => {
@@ -113,6 +126,12 @@ export default function RootLayout() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!incomingSequence || !latestIncomingMessage) return;
+    showToast(latestIncomingMessage, 'info', 'New activity');
+    clearLatestIncoming();
+  }, [incomingSequence, latestIncomingMessage, showToast, clearLatestIncoming]);
 
   useEffect(() => {
     // Handle deep link when the app is already open
@@ -203,36 +222,41 @@ export default function RootLayout() {
   };
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: colors.background },
-        animation: 'slide_from_right',
-      }}
-    >
-      <Stack.Screen name="index" />
-      <Stack.Screen name="(onboarding)" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="recipe/[id]" />
-      <Stack.Screen
-        name="recipe/cooking/[id]"
-        options={{ animation: 'slide_from_bottom', presentation: 'fullScreenModal' }}
-      />
-      <Stack.Screen name="category/[name]" />
-      <Stack.Screen name="recently-viewed" />
-      <Stack.Screen name="my-recipes" />
-      <Stack.Screen name="upload-recipe" />
-      <Stack.Screen name="browse-ai-recipes" />
-      <Stack.Screen name="browse-users" />
-      <Stack.Screen name="user/[id]" />
-      <Stack.Screen name="public-ai-plan/[id]" />
-      <Stack.Screen name="notifications" />
-      <Stack.Screen name="settings" />
-      <Stack.Screen name="change-username" />
-      <Stack.Screen name="change-password" />
-      <Stack.Screen name="change-email" />
-      <Stack.Screen name="help" />
-      <Stack.Screen name="privacy" />
-    </Stack>
+    <>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: 'slide_from_right',
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="(onboarding)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="recipe/[id]" />
+        <Stack.Screen
+          name="recipe/cooking/[id]"
+          options={{ animation: 'slide_from_bottom', presentation: 'fullScreenModal' }}
+        />
+        <Stack.Screen name="category/[name]" />
+        <Stack.Screen name="recently-viewed" />
+        <Stack.Screen name="my-recipes" />
+        <Stack.Screen name="upload-recipe" />
+        <Stack.Screen name="browse-ai-recipes" />
+        <Stack.Screen name="browse-users" />
+        <Stack.Screen name="user/[id]" />
+        <Stack.Screen name="public-ai-plan/[id]" />
+        <Stack.Screen name="notifications" />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="change-username" />
+        <Stack.Screen name="change-password" />
+        <Stack.Screen name="change-email" />
+        <Stack.Screen name="help" />
+        <Stack.Screen name="privacy" />
+      </Stack>
+
+      <GlobalNotificationBell />
+      <Toast visible={toast.visible} message={toast.message} type={toast.type} title={toast.title} />
+    </>
   );
 }

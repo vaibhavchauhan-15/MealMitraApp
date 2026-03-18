@@ -17,8 +17,14 @@ import { useTheme } from '../../src/theme/useTheme';
 import { Spacing, Typography, BorderRadius, Shadow } from '../../src/theme';
 import { SearchBar } from '../../src/components/SearchBar';
 import { FilterChip } from '../../src/components/FilterChip';
+import { RecipeCard } from '../../src/components/RecipeCard';
 import { FallbackImage } from '../../src/components/FallbackImage';
 import {
+  searchRecipes,
+  getTotalRecipeCount,
+  DIET_FILTERS,
+  DIFFICULTY_FILTERS,
+  CUISINE_LIST,
   BrowseAiRecipeCard,
   BrowsePublicUserCard,
   BrowseSortOption,
@@ -27,21 +33,30 @@ import {
   getPublicUsersWithUploadsPage,
 } from '../../src/services/searchService';
 import { PublicAiDietPlanCard, getPublicAiDietPlansPage } from '../../src/services/aiPlanSupabaseService';
+import { RecipeFilters, Recipe } from '../../src/types';
+import { useRecipeStore } from '../../src/store/recipeStore';
 import { useLocalRecentSearches } from '../../src/hooks/useLocalRecentSearches';
 import { getProfileIconById } from '../../src/constants/profileIcons';
 
-type SearchMode = 'recipe' | 'diet_plan' | 'users';
+type SearchMode = 'master_recipe' | 'ai_recipe' | 'diet_plan' | 'users';
 
 const PAGE_SIZE = 30;
 const MAX_RESULTS = 30;
 
+const TIME_FILTERS = [
+  { label: '<= 15 min', value: 15 },
+  { label: '<= 30 min', value: 30 },
+  { label: '<= 60 min', value: 60 },
+];
+
 const MODE_OPTIONS: { label: string; value: SearchMode }[] = [
-  { label: 'Recipe', value: 'recipe' },
-  { label: 'Diet Plan', value: 'diet_plan' },
+  { label: 'Recipe', value: 'master_recipe' },
+  { label: 'AI Recipe', value: 'ai_recipe' },
+  { label: 'AI Diet', value: 'diet_plan' },
   { label: 'Users', value: 'users' },
 ];
 
-const RECIPE_SORT_OPTIONS: { label: string; value: BrowseSortOption }[] = [
+const AI_RECIPE_SORT_OPTIONS: { label: string; value: BrowseSortOption }[] = [
   { label: 'Trending', value: 'trending' },
   { label: 'Recently active', value: 'recently_active' },
 ];
@@ -80,10 +95,11 @@ export default function SearchScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
 
-  const [mode, setMode] = useState<SearchMode>('recipe');
+  const [mode, setMode] = useState<SearchMode>('master_recipe');
   const [query, setQuery] = useState('');
 
-  const [recipeSortBy, setRecipeSortBy] = useState<BrowseSortOption>('trending');
+  const [masterFilters, setMasterFilters] = useState<RecipeFilters>({});
+  const [aiRecipeSortBy, setAiRecipeSortBy] = useState<BrowseSortOption>('trending');
   const [planSortBy, setPlanSortBy] = useState<'trending' | 'recently_active'>('trending');
   const [planDietFilter, setPlanDietFilter] = useState<string | undefined>(undefined);
   const [planCalorieFilter, setPlanCalorieFilter] = useState<number | undefined>(undefined);
@@ -92,15 +108,25 @@ export default function SearchScreen() {
   const [userCookingFilter, setUserCookingFilter] = useState<string>('All');
 
   const [showFilters, setShowFilters] = useState(false);
-  const [recipeResults, setRecipeResults] = useState<BrowseAiRecipeCard[]>([]);
+  const [masterResults, setMasterResults] = useState<Recipe[]>([]);
+  const [aiRecipeResults, setAiRecipeResults] = useState<BrowseAiRecipeCard[]>([]);
   const [planResults, setPlanResults] = useState<PublicAiDietPlanCard[]>([]);
   const [userResults, setUserResults] = useState<BrowsePublicUserCard[]>([]);
   const [loading, setLoading] = useState(false);
+  const [totalCount, setTotalCount] = useState(1000);
+
+  const addToCache = useRecipeStore((s) => s.addToCache);
 
   const {
-    recentSearches: recentRecipeSearches,
-    addRecentSearch: addRecipeRecentSearch,
-    clearRecentSearches: clearRecipeRecentSearches,
+    recentSearches: recentMasterSearches,
+    addRecentSearch: addMasterRecentSearch,
+    clearRecentSearches: clearMasterRecentSearches,
+  } = useLocalRecentSearches('recent_master_recipe_searches');
+
+  const {
+    recentSearches: recentAiRecipeSearches,
+    addRecentSearch: addAiRecipeRecentSearch,
+    clearRecentSearches: clearAiRecipeRecentSearches,
   } = useLocalRecentSearches('recent_ai_recipe_searches');
 
   const {
@@ -118,23 +144,32 @@ export default function SearchScreen() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modeScale = useRef<Record<SearchMode, Animated.Value>>({
-    recipe: new Animated.Value(1),
-    diet_plan: new Animated.Value(0.97),
-    users: new Animated.Value(0.97),
+    master_recipe: new Animated.Value(1),
+    ai_recipe: new Animated.Value(0.985),
+    diet_plan: new Animated.Value(0.985),
+    users: new Animated.Value(0.985),
   }).current;
+
+  useEffect(() => {
+    getTotalRecipeCount().then(setTotalCount);
+  }, []);
 
   const springModePill = useCallback((targetMode: SearchMode, toValue: number) => {
     Animated.spring(modeScale[targetMode], {
       toValue,
-      friction: 8,
-      tension: 130,
+      friction: 9,
+      tension: 120,
       useNativeDriver: true,
     }).start();
   }, [modeScale]);
 
   const activeFilterCount = useMemo(() => {
-    if (mode === 'recipe') {
-      return recipeSortBy !== 'trending' ? 1 : 0;
+    if (mode === 'master_recipe') {
+      return Object.values(masterFilters).filter((v) => v !== undefined && v !== null && v !== '').length;
+    }
+
+    if (mode === 'ai_recipe') {
+      return aiRecipeSortBy !== 'trending' ? 1 : 0;
     }
 
     if (mode === 'diet_plan') {
@@ -152,7 +187,8 @@ export default function SearchScreen() {
     return count;
   }, [
     mode,
-    recipeSortBy,
+    masterFilters,
+    aiRecipeSortBy,
     planSortBy,
     planDietFilter,
     planCalorieFilter,
@@ -161,22 +197,42 @@ export default function SearchScreen() {
     userCookingFilter,
   ]);
 
-  const hasActiveSearch = query.trim().length > 0 || activeFilterCount > 0;
+  const hasQuery = query.trim().length > 0;
 
-  const headerTitle = mode === 'recipe' ? 'AI Recipe' : mode === 'diet_plan' ? 'AI Diet Plan' : 'Users';
+  const headerTitle =
+    mode === 'master_recipe'
+      ? 'Master Recipe'
+      : mode === 'ai_recipe'
+      ? 'AI Recipe'
+      : mode === 'diet_plan'
+      ? 'AI Diet Plan'
+      : 'Users';
+
   const searchPlaceholder =
-    mode === 'recipe'
+    mode === 'master_recipe'
+      ? 'Search recipes by name, cuisine, ingredient...'
+      : mode === 'ai_recipe'
       ? 'Search AI recipes by title, cuisine, details...'
       : mode === 'diet_plan'
       ? 'Search AI diet plans by title...'
       : 'Search users by name or username';
 
   const currentRecentSearches =
-    mode === 'recipe' ? recentRecipeSearches : mode === 'diet_plan' ? recentPlanSearches : recentUserSearches;
+    mode === 'master_recipe'
+      ? recentMasterSearches
+      : mode === 'ai_recipe'
+      ? recentAiRecipeSearches
+      : mode === 'diet_plan'
+      ? recentPlanSearches
+      : recentUserSearches;
 
   const clearCurrentRecentSearches = useCallback(() => {
-    if (mode === 'recipe') {
-      void clearRecipeRecentSearches();
+    if (mode === 'master_recipe') {
+      void clearMasterRecentSearches();
+      return;
+    }
+    if (mode === 'ai_recipe') {
+      void clearAiRecipeRecentSearches();
       return;
     }
     if (mode === 'diet_plan') {
@@ -184,14 +240,22 @@ export default function SearchScreen() {
       return;
     }
     void clearUserRecentSearches();
-  }, [mode, clearRecipeRecentSearches, clearPlanRecentSearches, clearUserRecentSearches]);
+  }, [
+    mode,
+    clearMasterRecentSearches,
+    clearAiRecipeRecentSearches,
+    clearPlanRecentSearches,
+    clearUserRecentSearches,
+  ]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    if (!hasActiveSearch) {
+    const shouldShowMasterRecentOnly = mode === 'master_recipe' && !hasQuery && activeFilterCount === 0;
+    if (shouldShowMasterRecentOnly) {
       setLoading(false);
-      setRecipeResults([]);
+      setMasterResults([]);
+      setAiRecipeResults([]);
       setPlanResults([]);
       setUserResults([]);
       return;
@@ -200,15 +264,24 @@ export default function SearchScreen() {
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        if (mode === 'recipe') {
+        if (mode === 'master_recipe') {
+          const limit = hasQuery || activeFilterCount > 0 ? totalCount : 30;
+          const data = await searchRecipes(query, masterFilters, limit);
+          setMasterResults(data);
+          addToCache(data);
+          setAiRecipeResults([]);
+          setPlanResults([]);
+          setUserResults([]);
+        } else if (mode === 'ai_recipe') {
           const page = await getPublicAiRecipePage({
             query: query.trim(),
             offset: 0,
             limit: PAGE_SIZE,
             maxResults: MAX_RESULTS,
-            sortBy: recipeSortBy,
+            sortBy: aiRecipeSortBy,
           });
-          setRecipeResults(page.items);
+          setAiRecipeResults(page.items);
+          setMasterResults([]);
           setPlanResults([]);
           setUserResults([]);
         } else if (mode === 'diet_plan') {
@@ -222,7 +295,8 @@ export default function SearchScreen() {
             maxCalories: planCalorieFilter,
           });
           setPlanResults(page.items);
-          setRecipeResults([]);
+          setMasterResults([]);
+          setAiRecipeResults([]);
           setUserResults([]);
         } else {
           const page = await getPublicUsersWithUploadsPage({
@@ -235,31 +309,39 @@ export default function SearchScreen() {
             cookingLevel: userCookingFilter === 'All' ? undefined : userCookingFilter,
           });
           setUserResults(page.items);
-          setRecipeResults([]);
+          setMasterResults([]);
+          setAiRecipeResults([]);
           setPlanResults([]);
         }
       } catch (error) {
         console.warn('[search] unified search failed', error);
-        setRecipeResults([]);
+        setMasterResults([]);
+        setAiRecipeResults([]);
         setPlanResults([]);
         setUserResults([]);
       } finally {
         setLoading(false);
       }
-    }, 350);
+    }, 320);
 
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [
     mode,
     query,
-    hasActiveSearch,
-    recipeSortBy,
+    hasQuery,
+    activeFilterCount,
+    masterFilters,
+    aiRecipeSortBy,
     planSortBy,
     planDietFilter,
     planCalorieFilter,
     userSortBy,
     userDietFilter,
     userCookingFilter,
+    totalCount,
+    addToCache,
   ]);
 
   useEffect(() => {
@@ -269,8 +351,12 @@ export default function SearchScreen() {
     if (!normalizedQuery) return;
 
     saveSearchDebounceRef.current = setTimeout(() => {
-      if (mode === 'recipe') {
-        void addRecipeRecentSearch(normalizedQuery);
+      if (mode === 'master_recipe') {
+        void addMasterRecentSearch(normalizedQuery);
+        return;
+      }
+      if (mode === 'ai_recipe') {
+        void addAiRecipeRecentSearch(normalizedQuery);
         return;
       }
       if (mode === 'diet_plan') {
@@ -278,16 +364,43 @@ export default function SearchScreen() {
         return;
       }
       void addUserRecentSearch(normalizedQuery);
-    }, 1200);
+    }, 1000);
 
     return () => {
       if (saveSearchDebounceRef.current) clearTimeout(saveSearchDebounceRef.current);
     };
-  }, [mode, query, addRecipeRecentSearch, addPlanRecentSearch, addUserRecentSearch]);
+  }, [
+    mode,
+    query,
+    addMasterRecentSearch,
+    addAiRecipeRecentSearch,
+    addPlanRecentSearch,
+    addUserRecentSearch,
+  ]);
+
+  const toggleMasterDiet = useCallback((diet: string) => {
+    setMasterFilters((f) => ({ ...f, diet: f.diet === diet ? undefined : diet }));
+  }, []);
+
+  const toggleMasterCuisine = useCallback((cuisine: string) => {
+    setMasterFilters((f) => ({ ...f, cuisine: f.cuisine === cuisine ? undefined : cuisine }));
+  }, []);
+
+  const toggleMasterDifficulty = useCallback((difficulty: string) => {
+    setMasterFilters((f) => ({ ...f, difficulty: f.difficulty === difficulty ? undefined : difficulty }));
+  }, []);
+
+  const toggleMasterTime = useCallback((time: number) => {
+    setMasterFilters((f) => ({ ...f, maxCookTime: f.maxCookTime === time ? undefined : time }));
+  }, []);
 
   const clearAll = useCallback(() => {
-    if (mode === 'recipe') {
-      setRecipeSortBy('trending');
+    if (mode === 'master_recipe') {
+      setMasterFilters({});
+      return;
+    }
+    if (mode === 'ai_recipe') {
+      setAiRecipeSortBy('trending');
       return;
     }
     if (mode === 'diet_plan') {
@@ -308,18 +421,31 @@ export default function SearchScreen() {
     setQuery('');
 
     MODE_OPTIONS.forEach((option) => {
-      springModePill(option.value, option.value === nextMode ? 1 : 0.97);
+      springModePill(option.value, option.value === nextMode ? 1 : 0.985);
     });
   }, [springModePill]);
 
-  const shouldShowRecentSearches = !loading && !hasActiveSearch;
+  const shouldShowRecentSearches = mode === 'master_recipe' && !loading && !hasQuery && activeFilterCount === 0;
 
   const resultCount =
-    mode === 'recipe' ? recipeResults.length : mode === 'diet_plan' ? planResults.length : userResults.length;
+    mode === 'master_recipe'
+      ? masterResults.length
+      : mode === 'ai_recipe'
+      ? aiRecipeResults.length
+      : mode === 'diet_plan'
+      ? planResults.length
+      : userResults.length;
 
-  const resultLabel = mode === 'recipe' ? 'recipe' : mode === 'diet_plan' ? 'plan' : 'user';
+  const resultLabel =
+    mode === 'master_recipe'
+      ? 'recipe'
+      : mode === 'ai_recipe'
+      ? 'ai recipe'
+      : mode === 'diet_plan'
+      ? 'plan'
+      : 'user';
 
-  const renderRecipeCard = ({ item }: { item: BrowseAiRecipeCard }) => (
+  const renderAiRecipeCard = ({ item }: { item: BrowseAiRecipeCard }) => (
     <TouchableOpacity
       activeOpacity={0.88}
       style={[styles.resultCard, { backgroundColor: colors.surface, borderColor: colors.border }, Shadow.sm]}
@@ -436,8 +562,8 @@ export default function SearchScreen() {
               >
                 <TouchableOpacity
                   onPress={() => onModeChange(option.value)}
-                  onPressIn={() => springModePill(option.value, 0.95)}
-                  onPressOut={() => springModePill(option.value, active ? 1 : 0.97)}
+                  onPressIn={() => springModePill(option.value, 0.97)}
+                  onPressOut={() => springModePill(option.value, active ? 1 : 0.985)}
                   activeOpacity={0.95}
                   style={[
                     styles.modePill,
@@ -447,7 +573,14 @@ export default function SearchScreen() {
                     },
                   ]}
                 >
-                  <Text style={[styles.modePillText, { color: active ? '#FFF' : colors.textSecondary }]}>
+                  <Text
+                    style={[
+                      styles.modePillText,
+                      { color: active ? '#FFF' : colors.textSecondary, opacity: active ? 1 : 0.8 },
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
                     {option.label}
                   </Text>
                 </TouchableOpacity>
@@ -483,16 +616,73 @@ export default function SearchScreen() {
 
         {showFilters && (
           <View style={[styles.filtersPanel, { backgroundColor: colors.surface }]}>
-            {mode === 'recipe' && (
+            {mode === 'master_recipe' && (
+              <>
+                <View style={styles.filterRow}>
+                  <Text style={[styles.filterGroupLabel, { color: colors.textSecondary }]}>Diet</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {DIET_FILTERS.map((d) => (
+                      <FilterChip
+                        key={d}
+                        label={d}
+                        active={masterFilters.diet === d}
+                        onPress={() => toggleMasterDiet(d)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+                <View style={styles.filterRow}>
+                  <Text style={[styles.filterGroupLabel, { color: colors.textSecondary }]}>Difficulty</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {DIFFICULTY_FILTERS.map((d) => (
+                      <FilterChip
+                        key={d}
+                        label={d}
+                        active={masterFilters.difficulty === d}
+                        onPress={() => toggleMasterDifficulty(d)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+                <View style={styles.filterRow}>
+                  <Text style={[styles.filterGroupLabel, { color: colors.textSecondary }]}>Cook Time</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {TIME_FILTERS.map((t) => (
+                      <FilterChip
+                        key={t.label}
+                        label={t.label}
+                        active={masterFilters.maxCookTime === t.value}
+                        onPress={() => toggleMasterTime(t.value)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+                <View style={styles.filterRow}>
+                  <Text style={[styles.filterGroupLabel, { color: colors.textSecondary }]}>Cuisine</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {CUISINE_LIST.map((c) => (
+                      <FilterChip
+                        key={c}
+                        label={c}
+                        active={masterFilters.cuisine === c}
+                        onPress={() => toggleMasterCuisine(c)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+              </>
+            )}
+
+            {mode === 'ai_recipe' && (
               <View style={styles.filterRow}>
                 <Text style={[styles.filterGroupLabel, { color: colors.textSecondary }]}>Sort</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  {RECIPE_SORT_OPTIONS.map((item) => (
+                  {AI_RECIPE_SORT_OPTIONS.map((item) => (
                     <FilterChip
                       key={item.value}
                       label={item.label}
-                      active={recipeSortBy === item.value}
-                      onPress={() => setRecipeSortBy(item.value)}
+                      active={aiRecipeSortBy === item.value}
+                      onPress={() => setAiRecipeSortBy(item.value)}
                     />
                   ))}
                 </ScrollView>
@@ -621,9 +811,9 @@ export default function SearchScreen() {
         currentRecentSearches.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="search-outline" size={42} color={colors.textTertiary} />
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>Search {headerTitle.toLowerCase()}</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>Search recipes</Text>
             <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
-              Start typing and use filters to see results.
+              Type recipe title, ingredient, cuisine, or use filters to see results.
             </Text>
           </View>
         ) : (
@@ -648,17 +838,25 @@ export default function SearchScreen() {
         <View style={styles.empty}>
           <Ionicons name="search-outline" size={42} color={colors.textTertiary} />
           <Text style={[styles.emptyTitle, { color: colors.text }]}>No {resultLabel}s found</Text>
-          <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
-            Try a different search or remove some filters.
-          </Text>
+          <Text style={[styles.emptySub, { color: colors.textSecondary }]}>Try a different search or remove some filters.</Text>
         </View>
       ) : (
-        <FlatList
-          data={mode === 'recipe' ? recipeResults : mode === 'diet_plan' ? planResults : userResults}
-          keyExtractor={(item) => item.id}
+        <FlatList<any>
+          data={
+            mode === 'master_recipe'
+              ? masterResults
+              : mode === 'ai_recipe'
+              ? aiRecipeResults
+              : mode === 'diet_plan'
+              ? planResults
+              : userResults
+          }
+          keyExtractor={(item: any) => item.id}
           renderItem={
-            mode === 'recipe'
-              ? (renderRecipeCard as any)
+            mode === 'master_recipe'
+              ? ({ item }: { item: Recipe }) => <RecipeCard recipe={item} horizontal />
+              : mode === 'ai_recipe'
+              ? (renderAiRecipeCard as any)
               : mode === 'diet_plan'
               ? (renderPlanCard as any)
               : (renderUserCard as any)
@@ -680,31 +878,32 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: Typography.fontSize['2xl'],
     fontWeight: '800',
-    marginBottom: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   modeSwitch: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: BorderRadius['2xl'],
-    padding: 4,
+    padding: 3,
     marginBottom: Spacing.base,
+    overflow: 'hidden',
+  },
+  modePillWrap: {
+    flex: 1,
+    paddingHorizontal: 2,
   },
   modePill: {
-    flex: 1,
-    minHeight: 34,
+    height: 40,
     borderRadius: BorderRadius.xl,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.sm,
-  },
-  modePillWrap: {
-    flex: 1,
+    paddingHorizontal: Spacing.xs,
   },
   modePillText: {
-    fontSize: Typography.fontSize.sm,
-    fontWeight: '700',
+    fontSize: Typography.fontSize.xs,
+    fontWeight: '800',
   },
   searchRow: {
     flexDirection: 'row',

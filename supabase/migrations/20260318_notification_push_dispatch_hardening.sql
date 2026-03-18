@@ -1,0 +1,3 @@
+-- Intentionally left as a no-op.
+-- The push dispatch hardening SQL moved to a later migration so it runs after
+-- push_dispatch_queue is created by 20260318_notification_push_dispatch_trigger.sql.

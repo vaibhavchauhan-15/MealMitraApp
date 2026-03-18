@@ -39,3 +39,8 @@ entrypoint = "./functions/request-signup-otp/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/complete-signup-with-otp/index.ts"
+
+[functions.send-notification-push]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-notification-push/index.ts"
